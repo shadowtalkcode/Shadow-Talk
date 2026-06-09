@@ -1,0 +1,39 @@
+name: shadow_talk_flutter
+description: "Shadow Talk - secure messenger (iOS / Flutter port)."
+publish_to: 'none'
+
+version: 2.2.4+1
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  firebase_core:
+  image_picker: ^1.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+
+  fonts:
+    - family: OpenSans
+      fonts:
+        - asset: assets/fonts/open_sans.ttf
+        - asset: assets/fonts/open_sans_semibold.ttf
+          weight: 600
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/inter.ttf
+        - asset: assets/fonts/inter_semi_bold.ttf
+          weight: 600

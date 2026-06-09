@@ -1,0 +1,240 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../theme/app_colors.dart';
+import '../../widgets/common.dart';
+import 'profile_setup_screen.dart';
+
+/// "Verify your number" screen with underline PIN fields, a resend countdown,
+/// the entered number in the subtitle, and a back-confirmation dialog.
+class OtpVerifyScreen extends StatefulWidget {
+  final String phoneNumber;
+  const OtpVerifyScreen({super.key, this.phoneNumber = ''});
+
+  @override
+  State<OtpVerifyScreen> createState() => _OtpVerifyScreenState();
+}
+
+class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
+  final _controllers = List.generate(4, (_) => TextEditingController());
+  final _nodes = List.generate(4, (_) => FocusNode());
+
+  static const int _duration = 60; // 2:00 countdown
+  int _secondsLeft = _duration;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimer();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    for (final n in _nodes) {
+      n.dispose();
+    }
+    super.dispose();
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    setState(() => _secondsLeft = _duration);
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (_secondsLeft <= 1) {
+        t.cancel();
+        setState(() => _secondsLeft = 0);
+      } else {
+        setState(() => _secondsLeft -= 1);
+      }
+    });
+  }
+
+  String get _timeText {
+    final m = (_secondsLeft ~/ 60).toString().padLeft(2, '0');
+    final s = (_secondsLeft % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  void _onChanged(int i, String v) {
+    if (v.isNotEmpty && i < 3) _nodes[i + 1].requestFocus();
+    if (v.isEmpty && i > 0) _nodes[i - 1].requestFocus();
+    final code = _controllers.map((c) => c.text).join();
+    if (code.length == 4) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const ProfileSetupScreen()),
+      );
+    }
+  }
+
+  Future<bool> _confirmBack() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: const Color(0xFF221D34),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Are you sure you want to cancel the request to verify your phone number?',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 15, color: AppColors.textDesc, height: 1.4),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, false),
+                    child: const Text('No',
+                        style: TextStyle(
+                            color: AppColors.textDesc, fontWeight: FontWeight.w700, fontSize: 15)),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, true),
+                    child: const Text('Yes',
+                        style: TextStyle(
+                            color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 16)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return result ?? false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final navigator = Navigator.of(context);
+        if (await _confirmBack()) navigator.pop();
+      },
+      child: GradientScaffold(
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: AppColors.white),
+            onPressed: () async {
+              final navigator = Navigator.of(context);
+              if (await _confirmBack()) navigator.pop();
+            },
+          ),
+        ),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const Text(
+                  'Verify your number',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.white,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  "We've sent an SMS to ${widget.phoneNumber.isEmpty ? '+32 *********' : widget.phoneNumber} with a 4-digit verification code",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16, color: AppColors.textDesc, height: 1.4),
+                ),
+                const SizedBox(height: 48),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(4, (i) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: _OtpField(
+                        controller: _controllers[i],
+                        node: _nodes[i],
+                        onChanged: (v) => _onChanged(i, v),
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 32),
+                if (_secondsLeft > 0)
+                  Text(
+                    'Resend code in $_timeText',
+                    style: const TextStyle(fontSize: 16, color: AppColors.textDesc),
+                  )
+                else
+                  PrimaryButton(
+                    label: 'Try Again',
+                    width: 220,
+                    onPressed: () {
+                      for (final c in _controllers) {
+                        c.clear();
+                      }
+                      _nodes.first.requestFocus();
+                      _startTimer();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A single underline-style OTP digit field.
+class _OtpField extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode node;
+  final ValueChanged<String> onChanged;
+
+  const _OtpField({required this.controller, required this.node, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 48,
+      child: TextField(
+        controller: controller,
+        focusNode: node,
+        onChanged: onChanged,
+        textAlign: TextAlign.center,
+        keyboardType: TextInputType.number,
+        maxLength: 1,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: AppColors.white),
+        cursorColor: AppColors.primary,
+        decoration: const InputDecoration(
+          counterText: '',
+          isDense: true,
+          contentPadding: EdgeInsets.only(bottom: 8),
+          enabledBorder: UnderlineInputBorder(
+            borderSide: BorderSide(color: AppColors.divider, width: 2),
+          ),
+          focusedBorder: UnderlineInputBorder(
+            borderSide: BorderSide(color: AppColors.primary, width: 2),
+          ),
+        ),
+      ),
+    );
+  }
+}
