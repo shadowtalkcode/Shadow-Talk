@@ -3,7 +3,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../services/auth_service.dart';
+import '../../services/profile_store.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/image_storage.dart';
 import '../../widgets/common.dart';
 import '../main_screen.dart';
 
@@ -19,6 +22,15 @@ class ProfileSetupScreen extends StatefulWidget {
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   final _picker = ImagePicker();
   File? _photo;
+  final _nameCtrl = TextEditingController();
+  final _aboutCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _aboutCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _pick(ImageSource source) async {
     try {
@@ -28,7 +40,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         maxHeight: 1024,
         imageQuality: 85,
       );
-      if (file != null) setState(() => _photo = File(file.path));
+      if (file != null) {
+        final path = await ImageStorage.persist(file.path);
+        if (!mounted) return;
+        setState(() => _photo = File(path));
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -89,6 +105,22 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     );
   }
 
+  Future<void> _onNext() async {
+    // Persist what the user entered so Settings → Profile shows it.
+    await ProfileStore.instance.save(
+      name: _nameCtrl.text.trim(),
+      about: _aboutCtrl.text.trim(),
+      photoPath: _photo?.path,
+      phone: AuthService.instance.phoneNumber,
+    );
+    await AuthService.instance.setProfileCompleted(true);
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const MainScreen()),
+      (route) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return GradientScaffold(
@@ -132,11 +164,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                               shape: BoxShape.circle,
                               color: AppColors.surface,
                               border: Border.all(color: AppColors.primary, width: 2),
-                              image: _photo != null
+                              image: (_photo != null && _photo!.existsSync())
                                   ? DecorationImage(image: FileImage(_photo!), fit: BoxFit.cover)
                                   : null,
                             ),
-                            child: _photo == null
+                            child: (_photo == null || !_photo!.existsSync())
                                 ? const Icon(Icons.photo_camera,
                                     color: Color(0xFF4B4860), size: 40)
                                 : null,
@@ -162,18 +194,15 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 ),
               ),
               const SizedBox(height: 40),
-              const _Field(hint: 'Enter name'),
+              _Field(controller: _nameCtrl, hint: 'Enter name'),
               const SizedBox(height: 28),
-              const _Field(hint: 'Enter about yourself'),
+              _Field(controller: _aboutCtrl, hint: 'Enter about yourself'),
               const SizedBox(height: 36),
               Center(
                 child: PrimaryButton(
                   label: 'Next',
                   width: 280,
-                  onPressed: () => Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (_) => const MainScreen()),
-                    (route) => false,
-                  ),
+                  onPressed: _onNext,
                 ),
               ),
             ],
@@ -186,11 +215,13 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
 class _Field extends StatelessWidget {
   final String hint;
-  const _Field({required this.hint});
+  final TextEditingController controller;
+  const _Field({required this.hint, required this.controller});
 
   @override
   Widget build(BuildContext context) {
     return TextField(
+      controller: controller,
       style: const TextStyle(fontSize: 18, color: AppColors.white),
       cursorColor: AppColors.primary,
       decoration: InputDecoration(

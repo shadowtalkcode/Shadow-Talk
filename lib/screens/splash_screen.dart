@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../services/auth_service.dart';
 import '../theme/app_colors.dart';
+import 'main_screen.dart';
+import 'onboarding/profile_setup_screen.dart';
 import 'onboarding/welcome_screen.dart';
 
 /// Launch screen — just the logo centred on the dark background.
@@ -17,8 +20,23 @@ class _SplashScreenState extends State<SplashScreen> {
     super.initState();
     Future.delayed(const Duration(milliseconds: 2200), () {
       if (!mounted) return;
+      // Auth gate, mirroring the Android SplashActivity routing:
+      //  - not logged in        → onboarding (Welcome → phone login)
+      //  - logged in, no profile → profile setup
+      //  - logged in + profile   → home
+      final auth = AuthService.instance;
+      final Widget next;
+      if (!auth.isLoggedIn) {
+        next = const WelcomeScreen();
+      } else if (!auth.profileCompleted) {
+        next = const ProfileSetupScreen();
+      } else {
+        next = const MainScreen();
+      }
+      debugPrint('🔐 AUTH: splash gate → ${next.runtimeType} '
+          '(isLoggedIn=${auth.isLoggedIn}, profileCompleted=${auth.profileCompleted})');
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+        MaterialPageRoute(builder: (_) => next),
       );
     });
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/call_service.dart';
 import '../theme/app_colors.dart';
 import 'btc/offline_btc_screen.dart';
 import 'calls/calls_tab.dart';
@@ -17,6 +18,18 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Ensure the calling backend is connected (loads call history + starts the
+    // incoming-call listener) once the user reaches the home screen.
+    CallService.instance.start();
+    // Prompt for microphone + camera up-front so calls work immediately.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      CallService.instance.requestMediaPermissions();
+    });
+  }
 
   final _tabs = const [
     ChatsTab(),

@@ -13,12 +13,25 @@ dependencies:
 
   cupertino_icons: ^1.0.8
   firebase_core:
+  firebase_auth:
+  firebase_database:
+  firebase_storage:
+  shared_preferences: ^2.3.2
   image_picker: ^1.1.2
+  agora_rtc_engine: ^6.5.2
+  permission_handler: ^11.3.1
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+
+# Pin the iOS/macOS implementation of path_provider to a CocoaPods-compatible
+# release (2.6.0 ships Swift-Package-Manager-only and isn't picked up by our
+# CocoaPods build, so getApplicationDocumentsDirectory would fail at runtime).
+dependency_overrides:
+  path_provider_foundation: 2.4.1
 
 flutter:
   uses-material-design: true

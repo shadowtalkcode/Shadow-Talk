@@ -1,10 +1,13 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/common.dart';
+import '../main_screen.dart';
 import 'profile_setup_screen.dart';
 
 /// "Verify your number" screen with underline PIN fields, a resend countdown,
@@ -62,15 +65,78 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
     return '$m:$s';
   }
 
+  bool _verifying = false;
+  bool _resending = false;
+
   void _onChanged(int i, String v) {
     if (v.isNotEmpty && i < 3) _nodes[i + 1].requestFocus();
     if (v.isEmpty && i > 0) _nodes[i - 1].requestFocus();
     final code = _controllers.map((c) => c.text).join();
-    if (code.length == 4) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const ProfileSetupScreen()),
+    if (code.length == 4 && !_verifying) _submit(code);
+  }
+
+  Future<void> _submit(String code) async {
+    debugPrint('🔐 AUTH(UI): OTP entered "$code" → verifying…');
+    setState(() => _verifying = true);
+    FocusScope.of(context).unfocus();
+    try {
+      // Keep the "Initializing" loader on screen long enough to be seen (the
+      // Android app shows the spinning-gear setup screen during sign-in).
+      await Future.delayed(const Duration(milliseconds: 2000));
+      await AuthService.instance.confirmCode(code);
+      if (!mounted) return;
+      // Signed in. Route to profile setup (or home if already completed).
+      final completed = AuthService.instance.profileCompleted;
+      debugPrint('🔐 AUTH(UI): verified ✅ → ${completed ? 'MainScreen' : 'ProfileSetupScreen'}');
+      final next = completed ? const MainScreen() : const ProfileSetupScreen();
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => next),
+        (route) => false,
       );
+    } on FirebaseAuthException catch (e) {
+      _onVerifyError(e.code == 'invalid-verification-code'
+          ? 'Invalid verification code. Please try again.'
+          : (e.message ?? 'Verification failed. Please try again.'));
+    } catch (_) {
+      _onVerifyError('Verification failed. Please try again.');
     }
+  }
+
+  void _onVerifyError(String message) {
+    if (!mounted) return;
+    debugPrint('🔐 AUTH(UI): OTP verify error → $message');
+    setState(() => _verifying = false);
+    for (final c in _controllers) {
+      c.clear();
+    }
+    _nodes.first.requestFocus();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _resend() async {
+    debugPrint('🔐 AUTH(UI): resend requested');
+    for (final c in _controllers) {
+      c.clear();
+    }
+    setState(() => _resending = true);
+    await AuthService.instance.verifyPhone(
+      phoneNumber: widget.phoneNumber.replaceAll(RegExp(r'\s'), ''),
+      resend: true,
+      onCodeSent: () {
+        if (!mounted) return;
+        setState(() => _resending = false);
+        _startTimer();
+        _nodes.first.requestFocus();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Verification code resent')),
+        );
+      },
+      onError: (m) {
+        if (!mounted) return;
+        setState(() => _resending = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+      },
+    );
   }
 
   Future<bool> _confirmBack() async {
@@ -126,7 +192,9 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
         final navigator = Navigator.of(context);
         if (await _confirmBack()) navigator.pop();
       },
-      child: GradientScaffold(
+      child: Stack(
+        children: [
+          GradientScaffold(
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -169,13 +237,20 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                       child: _OtpField(
                         controller: _controllers[i],
                         node: _nodes[i],
+                        enabled: !_verifying,
                         onChanged: (v) => _onChanged(i, v),
                       ),
                     );
                   }),
                 ),
                 const SizedBox(height: 32),
-                if (_secondsLeft > 0)
+                if (_resending)
+                  const SizedBox(
+                    height: 24,
+                    width: 24,
+                    child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2.5),
+                  )
+                else if (_secondsLeft > 0)
                   Text(
                     'Resend code in $_timeText',
                     style: const TextStyle(fontSize: 16, color: AppColors.textDesc),
@@ -184,18 +259,18 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                   PrimaryButton(
                     label: 'Try Again',
                     width: 220,
-                    onPressed: () {
-                      for (final c in _controllers) {
-                        c.clear();
-                      }
-                      _nodes.first.requestFocus();
-                      _startTimer();
-                    },
+                    onPressed: _resend,
                   ),
               ],
             ),
           ),
         ),
+          ),
+          // Verification loader (mirrors the Android progress bar shown while
+          // the code is being checked).
+          if (_verifying)
+            const _VerifyingOverlay(),
+        ],
       ),
     );
   }
@@ -206,8 +281,14 @@ class _OtpField extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode node;
   final ValueChanged<String> onChanged;
+  final bool enabled;
 
-  const _OtpField({required this.controller, required this.node, required this.onChanged});
+  const _OtpField({
+    required this.controller,
+    required this.node,
+    required this.onChanged,
+    this.enabled = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -216,6 +297,7 @@ class _OtpField extends StatelessWidget {
       child: TextField(
         controller: controller,
         focusNode: node,
+        enabled: enabled,
         onChanged: onChanged,
         textAlign: TextAlign.center,
         keyboardType: TextInputType.number,
@@ -232,6 +314,76 @@ class _OtpField extends StatelessWidget {
           ),
           focusedBorder: UnderlineInputBorder(
             borderSide: BorderSide(color: AppColors.primary, width: 2),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-screen "Initializing" loader shown while the OTP code is being verified
+/// — mirrors the Android `SetupUserActivity`: a spinning gear icon above
+/// "Initializing" text whose trailing dots animate (. → .. → ...).
+class _VerifyingOverlay extends StatefulWidget {
+  const _VerifyingOverlay();
+
+  @override
+  State<_VerifyingOverlay> createState() => _VerifyingOverlayState();
+}
+
+class _VerifyingOverlayState extends State<_VerifyingOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _spin;
+  Timer? _dotTimer;
+  int _dotCount = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    // Gear spins 360° every 2s, forever (matches Android's RotateAnimation).
+    _spin = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+    // Dots cycle 1 → 2 → 3 every 500ms.
+    _dotTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted) return;
+      setState(() => _dotCount = (_dotCount % 3) + 1);
+    });
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    _dotTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: AbsorbPointer(
+        child: Container(
+          decoration: const BoxDecoration(gradient: AppColors.bgGradient),
+          alignment: Alignment.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RotationTransition(
+                turns: _spin,
+                child: const Icon(Icons.settings, size: 80, color: AppColors.white),
+              ),
+              const SizedBox(height: 32),
+              Text(
+                'Initializing${'.' * _dotCount}',
+                style: const TextStyle(
+                  color: AppColors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'OpenSans',
+                ),
+              ),
+            ],
           ),
         ),
       ),

@@ -1,68 +1,127 @@
 import 'package:flutter/material.dart';
 
-import '../../data/chat_repository.dart';
-import '../../models/call_log.dart';
-import '../../models/enums.dart';
+import '../../models/call.dart';
+import '../../models/user.dart';
+import '../../services/call_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/time_format.dart';
 import '../../widgets/avatar.dart';
-import 'call_screen.dart';
+import 'call_launcher.dart';
+import 'new_call_screen.dart';
 
-/// Calls tab — call history (display only). Matches the XD dark style.
+/// Calls tab — dynamic call history backed by [CallService]. Shows a centered
+/// empty state until the user makes/receives a call; tapping a row redials.
 class CallsTab extends StatelessWidget {
   const CallsTab({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final calls = ChatRepository.instance.calls;
     return Scaffold(
       backgroundColor: Colors.transparent,
+      // floatingActionButton: FloatingActionButton(
+      //   heroTag: 'fab_new_call',
+      //   backgroundColor: AppColors.primary,
+      //   onPressed: () => Navigator.of(context).push(
+      //     MaterialPageRoute(builder: (_) => const NewCallScreen()),
+      //   ),
+      //   child: const Icon(Icons.add_call, color: Colors.white),
+      // ),
       body: SafeArea(
         bottom: false,
-        child: CustomScrollView(
-          slivers: [
-            const SliverPadding(
-              padding: EdgeInsets.fromLTRB(24, 12, 24, 8),
-              sliver: SliverToBoxAdapter(
-                child: Text('Calls',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 34,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.white,
-                    )),
-              ),
-            ),
-            SliverList.builder(
-              itemCount: calls.length,
-              itemBuilder: (context, i) => _CallRow(call: calls[i]),
-            ),
-          ],
+        child: ValueListenableBuilder<List<CallRecord>>(
+          valueListenable: CallService.instance.history,
+          builder: (context, calls, _) {
+            return CustomScrollView(
+              slivers: [
+                const SliverPadding(
+                  padding: EdgeInsets.fromLTRB(24, 12, 24, 8),
+                  sliver: SliverToBoxAdapter(
+                    child: Text('Calls',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 34,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.white,
+                        )),
+                  ),
+                ),
+                if (calls.isEmpty)
+                  const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _EmptyCalls(),
+                  )
+                else
+                  SliverList.builder(
+                    itemCount: calls.length,
+                    itemBuilder: (context, i) => _CallRow(call: calls[i]),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 }
 
+/// Matches the Android `layout_empty_calls`: a 72dp semi-transparent phone
+/// icon, "No calls yet" (18sp, #F8F9FA), then "Your call history will appear
+/// here" (14sp, #ADB5BD), centered.
+class _EmptyCalls extends StatelessWidget {
+  const _EmptyCalls();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Opacity(
+            opacity: 0.4,
+            child: Icon(Icons.phone, color: const Color(0xFFF8F9FA), size: 72),
+          ),
+          const SizedBox(height: 16),
+          const Text('No calls yet',
+              style: TextStyle(color: Color(0xFFF8F9FA), fontSize: 18)),
+          const SizedBox(height: 8),
+          const Text('Your call history will appear here',
+              style: TextStyle(color: Color(0xFFADB5BD), fontSize: 14)),
+        ],
+      ),
+    );
+  }
+}
+
 class _CallRow extends StatelessWidget {
-  final CallLog call;
+  final CallRecord call;
   const _CallRow({required this.call});
 
   @override
   Widget build(BuildContext context) {
-    final (icon, color, label) = switch (call.type) {
-      CallType.incoming => (Icons.call_received, AppColors.green, 'Incoming'),
-      CallType.outgoing => (Icons.call_made, AppColors.green, 'Outgoing'),
-      CallType.missed => (Icons.call_missed, AppColors.red, 'Missed'),
+    final (icon, color, label) = switch (call.direction) {
+      CallDirection.incoming => (Icons.call_received, AppColors.green, 'Incoming'),
+      CallDirection.answered => (Icons.call_received, AppColors.green, 'Incoming'),
+      CallDirection.outgoing => (Icons.call_made, AppColors.green, 'Outgoing'),
+      CallDirection.missed => (Icons.call_missed, AppColors.red, 'Missed'),
     };
+    final user = User(
+      uid: call.peerUid,
+      userName: call.peerName,
+      localPhoto: call.peerPhoto,
+    );
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
-      leading: Avatar(user: call.user, size: 54, showBorder: false),
-      title: Text(call.user.userName,
+      leading: Avatar(user: user, size: 54, showBorder: false),
+      onTap: () => startCall(context,
+          peerUid: call.peerUid,
+          peerName: call.peerName,
+          peerPhoto: call.peerPhoto,
+          isVideo: call.isVideo),
+      title: Text(call.peerName,
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w600,
-            color: call.type == CallType.missed ? AppColors.red : AppColors.white,
+            color: call.isMissed ? AppColors.red : AppColors.white,
           )),
       subtitle: Row(
         children: [
@@ -74,11 +133,11 @@ class _CallRow extends StatelessWidget {
       ),
       trailing: IconButton(
         icon: Icon(call.isVideo ? Icons.videocam : Icons.call, color: AppColors.primary),
-        onPressed: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => CallScreen(user: call.user, isVideo: call.isVideo),
-          ),
-        ),
+        onPressed: () => startCall(context,
+            peerUid: call.peerUid,
+            peerName: call.peerName,
+            peerPhoto: call.peerPhoto,
+            isVideo: call.isVideo),
       ),
     );
   }

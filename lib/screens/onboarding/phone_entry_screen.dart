@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../data/countries.dart';
+import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/common.dart';
 import '../../widgets/country_picker.dart';
 import 'otp_verify_screen.dart';
+import 'profile_setup_screen.dart';
 
 /// "Enter your phone number" screen with a working country picker.
 /// This is the onboarding root — there is no back navigation to Welcome.
@@ -18,9 +20,10 @@ class PhoneEntryScreen extends StatefulWidget {
 class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
   // Default to Netherlands (as in the design).
   Country _country =
-      kCountries.firstWhere((c) => c.iso2 == 'NL', orElse: () => kCountries.first);
+      kCountries.firstWhere((c) => c.iso2 == 'PK', orElse: () => kCountries.first);
 
   final _phoneCtrl = TextEditingController();
+  bool _loading = false;
 
   @override
   void dispose() {
@@ -82,11 +85,7 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
                   TextButton(
                     onPressed: () {
                       Navigator.pop(dialogContext);
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => OtpVerifyScreen(phoneNumber: fullNumber),
-                        ),
-                      );
+                      _startVerification(fullNumber);
                     },
                     child: const Text('OK',
                         style: TextStyle(
@@ -98,6 +97,41 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  /// Sends the verification SMS via Firebase (with a local fallback), then
+  /// routes to the OTP screen. Mirrors the Android verifyPhoneNumber flow.
+  Future<void> _startVerification(String displayNumber) async {
+    final e164 = _country.dialCode + _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+    debugPrint('🔐 AUTH(UI): Continue confirmed → starting verification for $e164');
+    setState(() => _loading = true);
+    await AuthService.instance.verifyPhone(
+      phoneNumber: e164,
+      onCodeSent: () {
+        if (!mounted) return;
+        debugPrint('🔐 AUTH(UI): code sent → opening OTP screen');
+        setState(() => _loading = false);
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => OtpVerifyScreen(phoneNumber: displayNumber),
+          ),
+        );
+      },
+      onAutoVerified: () {
+        // Firebase auto-resolved the code (Android instant-verification).
+        if (!mounted) return;
+        setState(() => _loading = false);
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const ProfileSetupScreen()),
+        );
+      },
+      onError: (message) {
+        if (!mounted) return;
+        debugPrint('🔐 AUTH(UI): verification error → $message');
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      },
     );
   }
 
@@ -182,10 +216,16 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
                   ),
                 ),
                 const SizedBox(height: 36),
-                PrimaryButton(
-                  label: 'Continue',
-                  onPressed: _onContinue,
-                ),
+                if (_loading)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: CircularProgressIndicator(color: AppColors.primary),
+                  )
+                else
+                  PrimaryButton(
+                    label: 'Continue',
+                    onPressed: _onContinue,
+                  ),
               ],
             ),
           ),

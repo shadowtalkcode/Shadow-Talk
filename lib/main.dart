@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'screens/btc/offline_btc_screen.dart';
+import 'screens/calls/incoming_call_host.dart';
 import 'screens/chats/chat_screen.dart';
 import 'screens/chats/new_chat_screen.dart';
 import 'screens/main_screen.dart';
@@ -12,6 +13,10 @@ import 'screens/onboarding/profile_setup_screen.dart';
 import 'screens/settings/notifications_screen.dart';
 import 'screens/settings/profile_screen.dart';
 import 'screens/splash_screen.dart';
+import 'services/auth_service.dart';
+import 'services/call_service.dart';
+import 'services/chat_service.dart';
+import 'services/profile_store.dart';
 import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
 
@@ -21,9 +26,21 @@ import 'theme/app_theme.dart';
 /// normal splash flow.
 const String _startAt = String.fromEnvironment('START', defaultValue: 'splash');
 
-void main() async{
+/// Root navigator key — lets the call service present incoming calls from
+/// anywhere in the app.
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  try {
+    await Firebase.initializeApp();
+  } catch (_) {/* allow the app to run if Firebase isn't configured */}
+  await AuthService.instance.init();
+  await ProfileStore.instance.init();
+  // Connect the live chat + calling backends when the user is already signed in.
+  if (AuthService.instance.isLoggedIn) {
+    ChatService.instance.start().then((_) => CallService.instance.start());
+  }
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
@@ -68,8 +85,10 @@ class ShadowTalkApp extends StatelessWidget {
     return MaterialApp(
       title: 'Shadow Talk',
       debugShowCheckedModeBanner: false,
+      navigatorKey: rootNavigatorKey,
       theme: AppTheme.dark,
       themeMode: ThemeMode.dark,
+      builder: (context, child) => IncomingCallHost(child: child ?? const SizedBox()),
       home: _home,
     );
   }

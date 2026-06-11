@@ -3,8 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../../data/chat_repository.dart';
+import '../../services/profile_store.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/image_storage.dart';
 import '../../widgets/common.dart';
 
 /// Editable profile screen reached from Settings → Profile.
@@ -18,12 +19,22 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final _picker = ImagePicker();
-  File? _photo;
+  final _store = ProfileStore.instance;
 
-  late String _name = ChatRepository.instance.me.userName;
+  late File? _photo = _initialPhoto();
+
+  // Ignore a stored path whose file no longer exists (e.g. an old image_picker
+  // temp path that iOS purged) so we never feed a missing file to FileImage.
+  File? _initialPhoto() {
+    final p = _store.photoPath;
+    if (p == null || p.isEmpty) return null;
+    final f = File(p);
+    return f.existsSync() ? f : null;
+  }
+  late String _name = _store.name;
   late final TextEditingController _about =
-      TextEditingController(text: 'Heeey I am using Shadow Talk!');
-  late final String _phone = ChatRepository.instance.me.phone;
+      TextEditingController(text: _store.about);
+  late final String _phone = _store.phone;
 
   @override
   void dispose() {
@@ -69,7 +80,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final file = await _picker.pickImage(
           source: source, maxWidth: 1024, maxHeight: 1024, imageQuality: 85);
-      if (file != null) setState(() => _photo = File(file.path));
+      if (file != null) {
+        final path = await ImageStorage.persist(file.path);
+        if (!mounted) return;
+        setState(() => _photo = File(path));
+        await _store.save(photoPath: path);
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -127,7 +143,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ),
     );
-    if (result != null && result.isNotEmpty) setState(() => _name = result);
+    if (result != null && result.isNotEmpty) {
+      setState(() => _name = result);
+      await _store.save(name: result);
+    }
   }
 
   @override
@@ -163,7 +182,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           shape: BoxShape.circle,
                           color: Colors.transparent,
                           border: Border.all(color: const Color(0xFF6B6880), width: 1.5),
-                          image: _photo != null
+                          image: (_photo != null && _photo!.existsSync())
                               ? DecorationImage(image: FileImage(_photo!), fit: BoxFit.cover)
                               : null,
                         ),
@@ -195,10 +214,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: Text(_name,
+                  child: Text(_name.isEmpty ? 'Your name' : _name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppColors.white, fontSize: 20)),
+                      style: TextStyle(
+                          color: _name.isEmpty ? AppColors.textDesc : AppColors.white,
+                          fontSize: 20)),
                 ),
                 IconButton(
                   icon: const Icon(Icons.edit, color: AppColors.textDesc),
@@ -221,6 +242,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _about,
+                  onChanged: (v) => _store.save(about: v),
                   style: const TextStyle(color: AppColors.white, fontSize: 18),
                   cursorColor: AppColors.primary,
                   decoration: const InputDecoration(
@@ -233,7 +255,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 18),
-                Text(_phone.isEmpty ? '+1 456 456 4567' : _phone,
+                Text(_phone.isEmpty ? 'Not provided' : _phone,
                     style: const TextStyle(color: AppColors.white, fontSize: 18)),
               ],
             ),

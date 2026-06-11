@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/user.dart';
 import '../../theme/app_colors.dart';
+import '../calls/call_launcher.dart';
 
 /// Contact / group info screen. Matches XD reference 08: full-bleed photo
 /// header, dark info sheet, About Me / Phone cards, Block button and media tabs.
@@ -66,9 +67,25 @@ class ContactDetailsScreen extends StatelessWidget {
                             ],
                           ),
                         ),
-                        const Icon(Icons.videocam, color: AppColors.white, size: 26),
-                        const SizedBox(width: 18),
-                        const Icon(Icons.call, color: AppColors.white, size: 24),
+                        if (!user.isGroup) ...[
+                          IconButton(
+                            icon: const Icon(Icons.videocam, color: AppColors.white, size: 26),
+                            onPressed: () => startCall(context,
+                                peerUid: user.uid,
+                                peerName: user.userName,
+                                peerPhoto: user.localPhoto,
+                                isVideo: true),
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            icon: const Icon(Icons.call, color: AppColors.white, size: 24),
+                            onPressed: () => startCall(context,
+                                peerUid: user.uid,
+                                peerName: user.userName,
+                                peerPhoto: user.localPhoto,
+                                isVideo: false),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 20),
