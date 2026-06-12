@@ -21,10 +21,12 @@ class OtpVerifyScreen extends StatefulWidget {
 }
 
 class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
-  final _controllers = List.generate(4, (_) => TextEditingController());
-  final _nodes = List.generate(4, (_) => FocusNode());
+  // Android's OTPEditText uses 6 digits, auto-submitting when the 6th is typed.
+  static const int _otpLength = 6;
+  final _controllers = List.generate(_otpLength, (_) => TextEditingController());
+  final _nodes = List.generate(_otpLength, (_) => FocusNode());
 
-  static const int _duration = 60; // 2:00 countdown
+  static const int _duration = 60; // 1:00 countdown (Android CountDownTimer)
   int _secondsLeft = _duration;
   Timer? _timer;
 
@@ -60,7 +62,8 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
   }
 
   String get _timeText {
-    final m = (_secondsLeft ~/ 60).toString().padLeft(2, '0');
+    // Android format: "%d:%02d" → minutes without leading zero (e.g. "1:00", "0:30").
+    final m = _secondsLeft ~/ 60;
     final s = (_secondsLeft % 60).toString().padLeft(2, '0');
     return '$m:$s';
   }
@@ -69,10 +72,10 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
   bool _resending = false;
 
   void _onChanged(int i, String v) {
-    if (v.isNotEmpty && i < 3) _nodes[i + 1].requestFocus();
+    if (v.isNotEmpty && i < _otpLength - 1) _nodes[i + 1].requestFocus();
     if (v.isEmpty && i > 0) _nodes[i - 1].requestFocus();
     final code = _controllers.map((c) => c.text).join();
-    if (code.length == 4 && !_verifying) _submit(code);
+    if (code.length == _otpLength && !_verifying) _submit(code);
   }
 
   Future<void> _submit(String code) async {
@@ -95,7 +98,7 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
       );
     } on FirebaseAuthException catch (e) {
       _onVerifyError(e.code == 'invalid-verification-code'
-          ? 'Invalid verification code. Please try again.'
+          ? 'Verification code is invalid'
           : (e.message ?? 'Verification failed. Please try again.'));
     } catch (_) {
       _onVerifyError('Verification failed. Please try again.');
@@ -231,9 +234,9 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                 const SizedBox(height: 48),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(4, (i) {
+                  children: List.generate(_otpLength, (i) {
                     return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
                       child: _OtpField(
                         controller: _controllers[i],
                         node: _nodes[i],
@@ -252,7 +255,7 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                   )
                 else if (_secondsLeft > 0)
                   Text(
-                    'Resend code in $_timeText',
+                    'Try again after $_timeText',
                     style: const TextStyle(fontSize: 16, color: AppColors.textDesc),
                   )
                 else
@@ -293,7 +296,7 @@ class _OtpField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 48,
+      width: 44,
       child: TextField(
         controller: controller,
         focusNode: node,
@@ -303,7 +306,7 @@ class _OtpField extends StatelessWidget {
         keyboardType: TextInputType.number,
         maxLength: 1,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: AppColors.white),
+        style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: AppColors.white),
         cursorColor: AppColors.primary,
         decoration: const InputDecoration(
           counterText: '',

@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
+import '../../services/notification_settings.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/common.dart';
 
-/// Notifications settings screen. Matches the provided design: a master
-/// toggle, a ringtone row, a vibrate toggle, and a battery-optimization item.
+/// Notifications settings — a faithful, functional port of the Android
+/// `pref_notification.xml`: a master "New message notifications" switch, a
+/// "Ringtone" row and a "Vibrate" switch that are disabled while the master is
+/// off (Android's `dependency`), and an "Ignore Battery Optimization" row.
+/// Every value persists via [NotificationSettings].
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
 
@@ -13,9 +18,7 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
-  bool _newMessage = true;
-  bool _vibrate = false;
-  String _ringtone = 'Default';
+  final _s = NotificationSettings.instance;
 
   void _pickRingtone() {
     showModalBottomSheet(
@@ -40,12 +43,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             for (final r in ['Default', 'Note', 'Chime', 'Pulse', 'None'])
               ListTile(
                 title: Text(r, style: const TextStyle(color: AppColors.white)),
-                trailing: _ringtone == r
+                trailing: _s.ringtone == r
                     ? const Icon(Icons.check, color: AppColors.primary)
                     : null,
-                onTap: () {
-                  setState(() => _ringtone = r);
-                  Navigator.pop(sheetContext);
+                onTap: () async {
+                  await _s.setRingtone(r);
+                  if (mounted) setState(() {});
+                  if (sheetContext.mounted) Navigator.pop(sheetContext);
                 },
               ),
             const SizedBox(height: 8),
@@ -57,6 +61,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final master = _s.newMessage;
     return GradientScaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -72,20 +77,30 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         child: ListView(
           padding: const EdgeInsets.symmetric(vertical: 12),
           children: [
+            // Master switch.
             _ToggleRow(
               label: 'New message notifications',
-              value: _newMessage,
-              onChanged: (v) => setState(() => _newMessage = v),
+              value: master,
+              onChanged: (v) async {
+                await _s.setNewMessage(v);
+                if (mounted) setState(() {});
+              },
             ),
+            // Children — disabled while the master switch is off (dependency).
             _TapRow(
               label: 'Ringtone',
-              subtitle: _ringtone,
+              subtitle: _s.ringtone,
+              enabled: master,
               onTap: _pickRingtone,
             ),
             _ToggleRow(
               label: 'Vibrate',
-              value: _vibrate,
-              onChanged: (v) => setState(() => _vibrate = v),
+              value: _s.vibrate,
+              enabled: master,
+              onChanged: (v) async {
+                await _s.setVibrate(v);
+                if (mounted) setState(() {});
+              },
             ),
             const SizedBox(height: 20),
             _TapRow(
@@ -93,7 +108,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               labelBold: true,
               description:
                   'In order to make sure that all messages delivered correctly you have to disable Battery Optimizations',
-              onTap: () {},
+              onTap: () => openAppSettings(),
             ),
           ],
         ),
@@ -106,32 +121,41 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 class _ToggleRow extends StatelessWidget {
   final String label;
   final bool value;
+  final bool enabled;
   final ValueChanged<bool> onChanged;
 
-  const _ToggleRow({required this.label, required this.value, required this.onChanged});
+  const _ToggleRow({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    this.enabled = true,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => onChanged(!value),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(label,
-                  style: const TextStyle(fontSize: 19, color: AppColors.white)),
-            ),
-            Switch(
-              value: value,
-              onChanged: onChanged,
-              activeThumbColor: AppColors.white,
-              activeTrackColor: AppColors.primary,
-              inactiveThumbColor: const Color(0xFFBDBDBD),
-              inactiveTrackColor: const Color(0xFF4A4760),
-              trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
-            ),
-          ],
+    return Opacity(
+      opacity: enabled ? 1 : 0.4,
+      child: InkWell(
+        onTap: enabled ? () => onChanged(!value) : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(label,
+                    style: const TextStyle(fontSize: 19, color: AppColors.white)),
+              ),
+              Switch(
+                value: value,
+                onChanged: enabled ? onChanged : null,
+                activeThumbColor: AppColors.white,
+                activeTrackColor: AppColors.primary,
+                inactiveThumbColor: const Color(0xFFBDBDBD),
+                inactiveTrackColor: const Color(0xFF4A4760),
+                trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -142,6 +166,7 @@ class _ToggleRow extends StatelessWidget {
 class _TapRow extends StatelessWidget {
   final String label;
   final bool labelBold;
+  final bool enabled;
   final String? subtitle;
   final String? description;
   final VoidCallback onTap;
@@ -150,35 +175,39 @@ class _TapRow extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.labelBold = false,
+    this.enabled = true,
     this.subtitle,
     this.description,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label,
-                style: TextStyle(
-                    fontSize: labelBold ? 21 : 19,
-                    fontWeight: labelBold ? FontWeight.w700 : FontWeight.w400,
-                    color: AppColors.white)),
-            if (subtitle != null) ...[
-              const SizedBox(height: 4),
-              Text(subtitle!,
-                  style: const TextStyle(fontSize: 14, color: AppColors.textDesc)),
+    return Opacity(
+      opacity: enabled ? 1 : 0.4,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style: TextStyle(
+                      fontSize: labelBold ? 21 : 19,
+                      fontWeight: labelBold ? FontWeight.w700 : FontWeight.w400,
+                      color: AppColors.white)),
+              if (subtitle != null) ...[
+                const SizedBox(height: 4),
+                Text(subtitle!,
+                    style: const TextStyle(fontSize: 14, color: AppColors.textDesc)),
+              ],
+              if (description != null) ...[
+                const SizedBox(height: 8),
+                Text(description!,
+                    style: const TextStyle(fontSize: 15, color: AppColors.textDesc, height: 1.4)),
+              ],
             ],
-            if (description != null) ...[
-              const SizedBox(height: 8),
-              Text(description!,
-                  style: const TextStyle(fontSize: 15, color: AppColors.textDesc, height: 1.4)),
-            ],
-          ],
+          ),
         ),
       ),
     );

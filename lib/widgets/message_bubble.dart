@@ -36,9 +36,21 @@ class MessageBubble extends StatelessWidget {
         children: [
           _isBigEmoji ? _bigEmoji() : _bubble(context),
           const SizedBox(height: 6),
-          Text(
-            TimeFormat.clock24(message.timestamp),
-            style: const TextStyle(fontSize: 13, color: AppColors.messageTime),
+          // Time + delivery tick (tick only on our own sent messages), exactly
+          // like Android: single grey = sent, double grey = delivered, double
+          // blue = read.
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                TimeFormat.clock24(message.timestamp),
+                style: const TextStyle(fontSize: 13, color: AppColors.messageTime),
+              ),
+              if (_sent && message.kind != MessageKind.deleted) ...[
+                const SizedBox(width: 5),
+                _StatusTick(status: message.status),
+              ],
+            ],
           ),
         ],
       ),
@@ -271,6 +283,28 @@ class MessageBubble extends StatelessWidget {
                 color: _txt.withValues(alpha: 0.7))),
       ],
     );
+  }
+}
+
+/// Delivery indicator for a sent message — mirrors Android's `messageStat`
+/// drawables: clock (pending), single grey check (sent), double grey check
+/// (delivered/received), double blue check (read).
+class _StatusTick extends StatelessWidget {
+  final MessageStatus status;
+  const _StatusTick({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    switch (status) {
+      case MessageStatus.pending:
+        return const Icon(Icons.access_time, size: 14, color: AppColors.messageTime);
+      case MessageStatus.sent:
+        return const Icon(Icons.check, size: 16, color: AppColors.messageTime);
+      case MessageStatus.delivered:
+        return const Icon(Icons.done_all, size: 16, color: AppColors.messageTime);
+      case MessageStatus.read:
+        return const Icon(Icons.done_all, size: 16, color: AppColors.readState);
+    }
   }
 }
 

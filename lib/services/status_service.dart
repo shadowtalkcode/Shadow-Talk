@@ -151,6 +151,7 @@ class StatusService {
   /// Loads a single user's active (<24h) statuses, with my seen-state filled in.
   Future<List<StatusItem>> statusesOf(String ownerUid) async {
     final now = DateTime.now().millisecondsSinceEpoch;
+    final me = _uid;
     final items = <StatusItem>[];
     for (final path in ['status', 'textStatus']) {
       final snap = await _root.child(path).child(ownerUid).get();
@@ -158,13 +159,22 @@ class StatusService {
         (snap.value as Map).forEach((k, v) {
           if (v is Map) {
             final item = StatusItem.fromMap(k.toString(), ownerUid, v);
-            if (item.ts == 0 || now - item.ts < kStatusTtlMs) items.add(item);
+            // Match Android: a status is active only while it's < 24h old
+            // (timestamp within the last 24h). Anything older — or missing a
+            // timestamp — has expired and is hidden.
+            final expired = item.ts == 0 || now - item.ts >= kStatusTtlMs;
+            if (!expired) {
+              items.add(item);
+            } else if (ownerUid == me) {
+              // Proactively remove my own expired statuses so they truly
+              // disappear from the backend (not just hidden on read).
+              _root.child(path).child(ownerUid).child(item.id).remove();
+            }
           }
         });
       }
     }
     // Seen-state for friends' statuses.
-    final me = _uid;
     if (me != null && ownerUid != me) {
       for (final item in items) {
         final s = await _root
@@ -193,7 +203,7 @@ class StatusService {
           (snap.value as Map).forEach((k, v) {
             if (v is Map) {
               final item = StatusItem.fromMap(k.toString(), uid, v);
-              if (item.ts == 0 || now - item.ts < kStatusTtlMs) items.add(item);
+              if (item.ts != 0 && now - item.ts < kStatusTtlMs) items.add(item);
             }
           });
         }
@@ -246,7 +256,9 @@ class StatusService {
     final me = _uid;
     if (me == null) return [];
     try {
-      final snap = await _root.child('userChats').child(me).get();
+      // The per-user chat index lives under the open `messages/` subtree (the
+      // security rules deny top-level `userChats`). Mirrors ChatService.
+      final snap = await _root.child('messages').child('index').child(me).get();
       if (snap.value is Map) {
         return (snap.value as Map).keys.map((k) => k.toString()).toList();
       }

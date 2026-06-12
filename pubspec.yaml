@@ -21,6 +21,13 @@ dependencies:
   agora_rtc_engine: ^6.5.2
   permission_handler: ^11.3.1
   path_provider: ^2.1.4
+  bluetooth_low_energy: ^6.2.1
+  # Pure-Dart Ed25519 / X25519 / SHA-256 — used by the bitchat-compatible
+  # offline mesh so packets/announces sign & verify exactly like Android.
+  cryptography: ^2.7.0
+  # Detect physical device vs simulator so real Firebase phone auth runs only
+  # where it can (devices), with a local fallback on the simulator.
+  device_info_plus: ^11.2.0
 
 dev_dependencies:
   flutter_test:

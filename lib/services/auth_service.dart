@@ -1,5 +1,8 @@
-import 'package:flutter/foundation.dart';
+import 'dart:io' show Platform;
+
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Tagged auth logger — prints to the console so the verification flow is
@@ -24,16 +27,29 @@ class AuthService {
 
   static const _kLocalSession = 'st_local_session_phone';
   static const _kProfileCompleted = 'st_profile_completed';
+  static const _kInstalled = 'st_installed';
 
-  /// Real Firebase phone verification is only invoked when the build is
-  /// configured for it (`--dart-define=FIREBASE_PHONE=true`). On iOS this
-  /// requires the Phone provider enabled, an APNs auth key, and the
-  /// REVERSED_CLIENT_ID URL scheme — otherwise FirebaseAuth's native
-  /// `verifyPhoneNumber` raises a fatal assertion that can't be caught in
-  /// Dart (e.g. on the Simulator). When off, a persistent local session is
-  /// used so the flow still works end-to-end and mirrors the Android UX.
-  static const bool _firebasePhoneEnabled =
-      bool.fromEnvironment('FIREBASE_PHONE', defaultValue: false);
+  /// Phone-auth mode. Default `auto` → real Firebase SMS verification on a
+  /// physical device, local-session fallback on the iOS Simulator (which has no
+  /// APNs/push for the verification challenge, where native `verifyPhoneNumber`
+  /// would crash). Force with `--dart-define=FIREBASE_PHONE=true|false`.
+  static const String _phoneAuthMode =
+      String.fromEnvironment('FIREBASE_PHONE', defaultValue: 'auto');
+
+  /// Set once at [init] — true on a real iPhone/Android, false on a simulator.
+  bool _isPhysicalDevice = false;
+
+  /// Whether to drive the real Firebase phone-verification flow (real SMS).
+  bool get _useRealPhoneAuth {
+    switch (_phoneAuthMode) {
+      case 'true':
+        return true;
+      case 'false':
+        return false;
+      default:
+        return _isPhysicalDevice; // auto
+    }
+  }
 
   String? _verificationId;
   int? _resendToken;
@@ -42,17 +58,57 @@ class AuthService {
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
+    await _detectDevice();
+    await _clearStaleSessionOnFreshInstall();
     _log('init — isLoggedIn=$isLoggedIn, profileCompleted=$profileCompleted, '
-        'firebasePhoneEnabled=$_firebasePhoneEnabled');
+        'useRealPhoneAuth=$_useRealPhoneAuth (physical=$_isPhysicalDevice)');
+  }
+
+  /// Detects whether we're on a physical device or a simulator/emulator.
+  Future<void> _detectDevice() async {
+    try {
+      final info = DeviceInfoPlugin();
+      if (Platform.isIOS) {
+        _isPhysicalDevice = (await info.iosInfo).isPhysicalDevice;
+      } else if (Platform.isAndroid) {
+        _isPhysicalDevice = (await info.androidInfo).isPhysicalDevice;
+      } else {
+        _isPhysicalDevice = true;
+      }
+    } catch (e) {
+      _log('device detection failed ($e) → assuming simulator');
+      _isPhysicalDevice = false;
+    }
+  }
+
+  /// On iOS the Firebase auth session lives in the keychain, which survives an
+  /// app *uninstall* — while shared_preferences is wiped. That left a reinstall
+  /// "logged in" (stale anonymous user) but with no profile, routing to profile
+  /// setup. Detect a fresh install (our prefs flag is absent) and sign out the
+  /// leftover session so a reinstall correctly starts at the Welcome screen.
+  Future<void> _clearStaleSessionOnFreshInstall() async {
+    if (_prefs?.getBool(_kInstalled) == true) return;
+    try {
+      if (_auth.currentUser != null) {
+        await _auth.signOut();
+        _log('fresh install → cleared stale keychain session');
+      }
+    } catch (_) {/* Firebase not available */}
+    await _prefs?.setBool(_kInstalled, true);
   }
 
   // ---- Session state -----------------------------------------------------
   bool get isLoggedIn {
-    bool firebaseSignedIn = false;
+    bool realFirebaseUser = false;
     try {
-      firebaseSignedIn = _auth.currentUser != null;
+      final u = _auth.currentUser;
+      // An anonymous user is created purely for backend (chat / database)
+      // access — it does NOT mean the person has onboarded. Only a real
+      // (phone-authenticated) Firebase user counts as logged in, so an
+      // anonymous session never routes us past the Welcome screen.
+      realFirebaseUser = u != null && !u.isAnonymous;
     } catch (_) {/* Firebase not available */}
-    return firebaseSignedIn || (_prefs?.getString(_kLocalSession) != null);
+    return realFirebaseUser || (_prefs?.getString(_kLocalSession) != null);
   }
 
   /// The Firebase user id used to key chat data. Real phone-auth uids when
@@ -104,12 +160,13 @@ class AuthService {
   }) async {
     _pendingPhone = phoneNumber;
     _log('verifyPhone → "$phoneNumber" (resend=$resend, '
-        'firebasePhoneEnabled=$_firebasePhoneEnabled)');
+        'useRealPhoneAuth=$_useRealPhoneAuth)');
 
-    // Without a properly-configured Firebase phone provider, calling
-    // verifyPhoneNumber crashes natively on iOS — use the local session flow.
-    if (!_firebasePhoneEnabled) {
-      _log('verifyPhone → local-session mode (Firebase phone auth disabled)');
+    // On a simulator there's no APNs/push for the verification challenge, so the
+    // native verifyPhoneNumber would crash — use the local session flow instead.
+    // On a real device we drive the real SMS verification below.
+    if (!_useRealPhoneAuth) {
+      _log('verifyPhone → local-session mode (simulator / forced local)');
       _enterLocalMode();
       onCodeSent();
       return;

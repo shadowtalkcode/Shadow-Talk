@@ -88,15 +88,23 @@ class Presence {
 
 /// Real-time 1:1 chat backend over Firebase Realtime Database — same
 /// user-facing behaviour as the Android app (live send/receive, message status,
-/// presence, typing) using a clean client-to-client schema:
+/// presence, typing).
+///
+/// IMPORTANT: the conversation data lives **under the `messages/` subtree**,
+/// because the Shadow Talk Firebase security rules only grant access to the
+/// nodes the Android app uses (`messages`, `users`, `presence`, `uidByPhone`,
+/// `typingStat`, …). Top-level `chats`/`userChats` nodes are denied by the
+/// rules, so writing there silently fails with permission-denied. The `messages`
+/// node is open read/write and its rules cascade to every descendant, so we
+/// nest the conversation + per-user index beneath it:
 ///
 /// ```
-///   users/{uid}             : { name, phone, photoUrl }
-///   uidByPhone/{phone}      : uid
-///   presence/{uid}          : { online, lastSeen }
-///   chats/{chatId}/messages/{msgId} : { from, to, text, type, ts, status }
-///   chats/{chatId}/typing/{uid}     : bool
-///   userChats/{uid}/{peerUid}       : { lastText, lastTs, lastFromMe, unread }
+///   users/{uid}                              : { name, phone, photoUrl }
+///   uidByPhone/{phone}                       : uid
+///   presence/{uid}                           : { online, lastSeen }
+///   messages/conv/{chatId}/messages/{msgId}  : { from, to, text, type, ts, status }
+///   messages/conv/{chatId}/typing/{uid}      : bool
+///   messages/index/{uid}/{peerUid}           : { lastText, lastTs, lastFromMe, unread }
 /// ```
 class ChatService {
   ChatService._();
@@ -110,6 +118,15 @@ class ChatService {
   bool get isReady => _ready;
 
   DatabaseReference get _root => _db.ref();
+
+  /// Conversation node (messages + typing) for a chat, under the open
+  /// `messages/` subtree so the security rules permit it.
+  DatabaseReference _convRef(String chatId) =>
+      _root.child('messages').child('conv').child(chatId);
+
+  /// Per-user recent-chats index, also under the open `messages/` subtree.
+  DatabaseReference _indexRef(String uid) =>
+      _root.child('messages').child('index').child(uid);
 
   static String sanitizePhone(String phone) =>
       phone.replaceAll(RegExp(r'[^0-9]'), '');
@@ -205,7 +222,7 @@ class ChatService {
     final uid = _uid;
     if (uid == null || text.trim().isEmpty) return;
     final chatId = chatIdWith(peerUid);
-    final ref = _root.child('chats').child(chatId).child('messages').push();
+    final ref = _convRef(chatId).child('messages').push();
     final msg = {
       'from': uid,
       'to': peerUid,
@@ -218,13 +235,13 @@ class ChatService {
 
     // Update both users' chat index.
     final now = DateTime.now().millisecondsSinceEpoch;
-    await _root.child('userChats').child(uid).child(peerUid).update({
+    await _indexRef(uid).child(peerUid).update({
       'lastText': text.trim(),
       'lastTs': now,
       'lastFromMe': true,
       'unread': 0,
     });
-    final peerIndex = _root.child('userChats').child(peerUid).child(uid);
+    final peerIndex = _indexRef(peerUid).child(uid);
     await peerIndex.update({
       'lastText': text.trim(),
       'lastTs': now,
@@ -239,9 +256,7 @@ class ChatService {
   /// Live messages for a conversation, ordered oldest→newest.
   Stream<List<LiveMessage>> messages(String peerUid) {
     final chatId = chatIdWith(peerUid);
-    return _root
-        .child('chats')
-        .child(chatId)
+    return _convRef(chatId)
         .child('messages')
         .orderByChild('ts')
         .onValue
@@ -263,7 +278,7 @@ class ChatService {
     final uid = _uid;
     if (uid == null) return;
     final chatId = chatIdWith(peerUid);
-    final ref = _root.child('chats').child(chatId).child('messages');
+    final ref = _convRef(chatId).child('messages');
     final snap = await ref.get();
     if (snap.value is Map) {
       final updates = <String, Object?>{};
@@ -277,7 +292,7 @@ class ChatService {
       if (updates.isNotEmpty) await ref.update(updates);
     }
     if (read) {
-      await _root.child('userChats').child(uid).child(peerUid).child('unread').set(0);
+      await _indexRef(uid).child(peerUid).child('unread').set(0);
     }
   }
 
@@ -285,18 +300,11 @@ class ChatService {
   Future<void> setTyping(String peerUid, bool typing) async {
     final uid = _uid;
     if (uid == null) return;
-    await _root
-        .child('chats')
-        .child(chatIdWith(peerUid))
-        .child('typing')
-        .child(uid)
-        .set(typing);
+    await _convRef(chatIdWith(peerUid)).child('typing').child(uid).set(typing);
   }
 
   Stream<bool> peerTyping(String peerUid) {
-    return _root
-        .child('chats')
-        .child(chatIdWith(peerUid))
+    return _convRef(chatIdWith(peerUid))
         .child('typing')
         .child(peerUid)
         .onValue
@@ -330,7 +338,7 @@ class ChatService {
   Stream<List<ChatSummary>> chatsList() {
     final uid = _uid;
     if (uid == null) return const Stream.empty();
-    return _root.child('userChats').child(uid).onValue.asyncMap((event) async {
+    return _indexRef(uid).onValue.asyncMap((event) async {
       final val = event.snapshot.value;
       final summaries = <ChatSummary>[];
       if (val is Map) {

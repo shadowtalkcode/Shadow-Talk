@@ -5,6 +5,11 @@ PODS:
     - Flutter
   - AgoraIrisRTC_iOS (4.5.3-build.1)
   - AgoraRtcEngine_Special_iOS (4.5.3.70)
+  - bluetooth_low_energy_darwin (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - device_info_plus (0.0.1):
+    - Flutter
   - Firebase/Auth (12.14.0):
     - Firebase/CoreOnly
     - FirebaseAuth (~> 12.14.0)
@@ -107,6 +112,8 @@ PODS:
 
 DEPENDENCIES:
   - agora_rtc_engine (from `.symlinks/plugins/agora_rtc_engine/ios`)
+  - bluetooth_low_energy_darwin (from `.symlinks/plugins/bluetooth_low_energy_darwin/darwin`)
+  - device_info_plus (from `.symlinks/plugins/device_info_plus/ios`)
   - firebase_auth (from `.symlinks/plugins/firebase_auth/ios`)
   - firebase_core (from `.symlinks/plugins/firebase_core/ios`)
   - firebase_database (from `.symlinks/plugins/firebase_database/ios`)
@@ -140,6 +147,10 @@ SPEC REPOS:
 EXTERNAL SOURCES:
   agora_rtc_engine:
     :path: ".symlinks/plugins/agora_rtc_engine/ios"
+  bluetooth_low_energy_darwin:
+    :path: ".symlinks/plugins/bluetooth_low_energy_darwin/darwin"
+  device_info_plus:
+    :path: ".symlinks/plugins/device_info_plus/ios"
   firebase_auth:
     :path: ".symlinks/plugins/firebase_auth/ios"
   firebase_core:
@@ -165,6 +176,8 @@ SPEC CHECKSUMS:
   agora_rtc_engine: 5b30634b45c4b80ee538ede0b6e274ae4ba352f8
   AgoraIrisRTC_iOS: d6468160cad25d36c2b6cb5e9bd5b17ba4e58677
   AgoraRtcEngine_Special_iOS: 48063561d21b07524358ee0a17abc6be762c58f7
+  bluetooth_low_energy_darwin: 50bc79258e60586e4c4bed5948bd31d925f37fac
+  device_info_plus: bf2e3232933866d73fe290f2942f2156cdd10342
   Firebase: 7cc10425300768ec86292688af5cb228f0604bde
   firebase_auth: 08d9e2155c59dee7b84db916334a017a1c22633f
   firebase_core: 059f6939d27b5644ea96ad8ad71a9a6e17db74f1

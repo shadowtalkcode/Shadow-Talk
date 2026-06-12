@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../data/countries.dart';
 import '../../services/auth_service.dart';
@@ -18,9 +19,9 @@ class PhoneEntryScreen extends StatefulWidget {
 }
 
 class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
-  // Default to Netherlands (as in the design).
+  // Default to US, matching the Android CountryCodePicker default ("US").
   Country _country =
-      kCountries.firstWhere((c) => c.iso2 == 'PK', orElse: () => kCountries.first);
+      kCountries.firstWhere((c) => c.iso2 == 'US', orElse: () => kCountries.first);
 
   final _phoneCtrl = TextEditingController();
   bool _loading = false;
@@ -37,14 +38,18 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
   }
 
   void _onContinue() {
+    // Match Android: validate non-empty and digits-only, else "Please enter a
+    // correct number".
     final number = _phoneCtrl.text.trim();
-    if (number.isEmpty) {
+    final digitsOnly = RegExp(r'^\d+$').hasMatch(number);
+    if (number.isEmpty || !digitsOnly) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your phone number')),
+        const SnackBar(content: Text('Please enter a correct number')),
       );
       return;
     }
-    final fullNumber = '${_country.dialCode} $number';
+    // Android builds the confirmation number as countryCodeWithPlus + number.
+    final fullNumber = '${_country.dialCode}$number';
     showDialog(
       context: context,
       barrierColor: Colors.black54,
@@ -57,19 +62,9 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'We will send an SMS message to verify your number. Is this number correct?',
+                'we will send you a SMS message to $fullNumber to verify your number',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 15, color: AppColors.textDesc, height: 1.4),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                fullNumber,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.white,
-                ),
               ),
               const SizedBox(height: 20),
               Row(
@@ -159,7 +154,7 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
                 ),
                 const SizedBox(height: 14),
                 const Text(
-                  "Make sure this number can receive SMS and calls. You'll receive your verification code by SMS.",
+                  "Make sure this number can receive SMS and calls. You'll receive your activation code through it.",
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 16, color: AppColors.textDesc, height: 1.4),
                 ),
@@ -201,13 +196,14 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
                       Expanded(
                         child: TextField(
                           controller: _phoneCtrl,
-                          keyboardType: TextInputType.phone,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                           style: const TextStyle(fontSize: 18, color: AppColors.white),
                           cursorColor: AppColors.primary,
                           decoration: const InputDecoration(
                             isDense: true,
                             border: InputBorder.none,
-                            hintText: 'Enter phone number',
+                            hintText: '123 123456',
                             hintStyle: TextStyle(fontSize: 18, color: AppColors.textDesc),
                           ),
                         ),

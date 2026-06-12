@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Shadow Talk Flutter</string>
+	<string>Shadow Talk</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Shadow Talk uses Bluetooth to chat with nearby devices offline, without the internet.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Shadow Talk uses Bluetooth to chat with nearby devices offline, without the internet.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Shadow Talk needs access to your camera for video calls and to take a profile picture.</string>
 	<key>NSMicrophoneUsageDescription</key>

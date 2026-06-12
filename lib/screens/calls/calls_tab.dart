@@ -7,7 +7,6 @@ import '../../theme/app_colors.dart';
 import '../../utils/time_format.dart';
 import '../../widgets/avatar.dart';
 import 'call_launcher.dart';
-import 'new_call_screen.dart';
 
 /// Calls tab — dynamic call history backed by [CallService]. Shows a centered
 /// empty state until the user makes/receives a call; tapping a row redials.

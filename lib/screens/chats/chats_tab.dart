@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import '../../utils/time_format.dart';
 import '../../widgets/avatar.dart';
 import '../../widgets/common.dart';
 import 'live_chat_screen.dart';
+import '../offline/offline_chat_screen.dart';
 import '../status/story_viewer.dart';
 import '../status/text_status_composer.dart';
 import 'new_chat_screen.dart';
@@ -28,15 +30,118 @@ class _ChatsTabState extends State<ChatsTab> {
   final _chat = ChatService.instance;
   Stream<List<ChatSummary>>? _chatsStream;
 
+  bool _searching = false;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  // Directory (contact) search — find a user by phone, like WhatsApp/Android so
+  // you can start a brand-new chat from the same inline search box.
+  Timer? _debounce;
+  DirUser? _foundUser;
+  bool _dirLoading = false;
+
+  // Marks incoming messages "delivered" (double grey tick on the sender's side)
+  // once our app — online on the home list — has received them, even before the
+  // chat is opened. Dedup per (peer, lastTs) so we don't re-scan repeatedly.
+  final Set<String> _deliveredMarked = {};
+
+  void _markDelivered(List<ChatSummary> all) {
+    for (final c in all) {
+      if (c.unread > 0 && !c.lastFromMe) {
+        final key = '${c.peerUid}:${c.lastTs}';
+        if (_deliveredMarked.add(key)) {
+          _chat.markIncoming(c.peerUid, read: false);
+        }
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _ensureStarted();
   }
 
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _ensureStarted() async {
     if (!_chat.isReady) await _chat.start();
     if (mounted) setState(() => _chatsStream = _chat.chatsList());
+  }
+
+  void _openSearch() {
+    setState(() => _searching = true);
+  }
+
+  void _closeSearch() {
+    _debounce?.cancel();
+    setState(() {
+      _searching = false;
+      _searchCtrl.clear();
+      _query = '';
+      _foundUser = null;
+      _dirLoading = false;
+    });
+  }
+
+  /// As the query changes: update the live filter immediately and (debounced)
+  /// look up a Shadow Talk user by phone number for the "start new chat" result.
+  void _onQueryChanged(String v) {
+    setState(() => _query = v);
+    _debounce?.cancel();
+    final digits = ChatService.sanitizePhone(v);
+    if (digits.length < 4) {
+      setState(() {
+        _foundUser = null;
+        _dirLoading = false;
+      });
+      return;
+    }
+    setState(() => _dirLoading = true);
+    _debounce = Timer(const Duration(milliseconds: 400), () => _runDirectorySearch(v));
+  }
+
+  Future<void> _runDirectorySearch(String query) async {
+    try {
+      if (!_chat.isReady) await _chat.start();
+      final user = await _chat.findUserByPhone(query);
+      if (!mounted || query != _query) return;
+      setState(() {
+        _foundUser = (user != null && user.uid != _chat.uid) ? user : null;
+        _dirLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _dirLoading = false);
+    }
+  }
+
+  void _openFoundUser(DirUser u) {
+    _closeSearch();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => LiveChatScreen(
+          peerUid: u.uid,
+          peerName: u.name,
+          peerPhoto: u.photo,
+        ),
+      ),
+    );
+  }
+
+  /// Filters the chat list by peer name or last message text (case-insensitive).
+  List<ChatSummary> _filter(List<ChatSummary> chats) {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return chats;
+    return chats
+        .where((c) =>
+            c.peerName.toLowerCase().contains(q) ||
+            c.lastText.toLowerCase().contains(q))
+        .toList();
   }
 
   void _openLive(ChatSummary s) {
@@ -57,6 +162,94 @@ class _ChatsTabState extends State<ChatsTab> {
     );
   }
 
+  Future<void> _offlineChat() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const OfflineChatScreen()),
+    );
+  }
+
+  /// The default header: large "Chats" title + offline/add/search actions.
+  Widget _headerBar() {
+    return Row(
+      children: [
+        const Text(
+          'Chats',
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 34,
+            fontWeight: FontWeight.w800,
+            color: AppColors.white,
+          ),
+        ),
+        const Spacer(),
+        // Offline Chat — uses the exact Android toolbar icon.
+        Material(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: _offlineChat,
+            child: SizedBox(
+              width: 48,
+              height: 48,
+              child: Center(
+                child: Image.asset(
+                  'assets/images/ic_offline_chat.png',
+                  width: 22,
+                  height: 22,
+                  color: AppColors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        SquareIconButton(icon: Icons.add, onTap: _newChat),
+        const SizedBox(width: 12),
+        SquareIconButton(icon: Icons.search, onTap: _openSearch),
+      ],
+    );
+  }
+
+  /// Inline search field that replaces the header — stays on this screen and
+  /// filters the chat list as you type.
+  Widget _searchBar() {
+    return Container(
+      height: 48,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 12),
+          const Icon(Icons.search, color: AppColors.textDesc, size: 22),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _searchCtrl,
+              autofocus: true,
+              cursorColor: AppColors.primary,
+              style: const TextStyle(color: AppColors.white, fontSize: 16),
+              textInputAction: TextInputAction.search,
+              onChanged: _onQueryChanged,
+              decoration: const InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                hintText: 'Search chats or phone number',
+                hintStyle: TextStyle(color: AppColors.textDesc, fontSize: 16),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, color: AppColors.textDesc, size: 22),
+            onPressed: _closeSearch,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -67,50 +260,92 @@ class _ChatsTabState extends State<ChatsTab> {
           builder: (context) {
             return CustomScrollView(
               slivers: [
-                // Header
+                // Header — title + actions, or an inline search field.
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(24, 12, 20, 8),
                   sliver: SliverToBoxAdapter(
-                    child: Row(
-                      children: [
-                        const Text(
-                          'Chats',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 34,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.white,
-                          ),
-                        ),
-                        const Spacer(),
-                        SquareIconButton(icon: Icons.add, onTap: _newChat),
-                        const SizedBox(width: 12),
-                        SquareIconButton(icon: Icons.search, onTap: _newChat),
-                      ],
-                    ),
+                    child: _searching ? _searchBar() : _headerBar(),
                   ),
                 ),
-                // Tales strip (My tale + friends' stories)
-                SliverToBoxAdapter(child: _TalesStrip()),
-                const SliverToBoxAdapter(
-                  child: Divider(color: Color(0xFF2A2640), height: 1, indent: 24, endIndent: 24),
+                // Tales strip (collapsed while searching, like Android). Kept as
+                // a single always-present sliver so the chat StreamBuilder below
+                // never shifts position and re-listens its stream.
+                SliverToBoxAdapter(
+                  child: _searching
+                      ? const SizedBox.shrink()
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _TalesStrip(),
+                            const Divider(
+                                color: Color(0xFF2A2640),
+                                height: 1,
+                                indent: 24,
+                                endIndent: 24),
+                            const SizedBox(height: 8),
+                          ],
+                        ),
                 ),
-                const SliverToBoxAdapter(child: SizedBox(height: 8)),
                 // Live chats from Realtime Database
                 SliverToBoxAdapter(
                   child: StreamBuilder<List<ChatSummary>>(
                     stream: _chatsStream,
                     builder: (context, snap) {
-                      final chats = snap.data ?? const <ChatSummary>[];
-                      if (chats.isEmpty) {
-                        return _EmptyChats(onStart: _newChat);
+                      final all = snap.data ?? const <ChatSummary>[];
+
+                      // Acknowledge delivery of incoming messages while we're
+                      // online on the home list (drives the sender's double tick).
+                      if (all.isNotEmpty) {
+                        WidgetsBinding.instance
+                            .addPostFrameCallback((_) => _markDelivered(all));
                       }
-                      return Column(
-                        children: [
-                          for (final c in chats)
-                            _LiveChatRow(summary: c, onTap: () => _openLive(c)),
-                        ],
-                      );
+
+                      // Normal mode: existing chats (or the empty state).
+                      if (!_searching) {
+                        if (all.isEmpty) return _EmptyChats(onStart: _newChat);
+                        return Column(
+                          children: [
+                            for (final c in all)
+                              _LiveChatRow(summary: c, onTap: () => _openLive(c)),
+                          ],
+                        );
+                      }
+
+                      // Search mode: matching existing chats + a directory lookup
+                      // so you can start a brand-new chat without leaving (WhatsApp).
+                      final chats = _filter(all);
+                      final found = _foundUser;
+                      final foundIsNew =
+                          found != null && all.every((c) => c.peerUid != found.uid);
+
+                      final children = <Widget>[];
+                      if (chats.isNotEmpty) {
+                        children.add(const _SectionLabel('Chats'));
+                        for (final c in chats) {
+                          children.add(_LiveChatRow(summary: c, onTap: () => _openLive(c)));
+                        }
+                      }
+                      if (foundIsNew) {
+                        children.add(const _SectionLabel('Start new chat'));
+                        children.add(_DirUserRow(
+                            user: found, onTap: () => _openFoundUser(found)));
+                      }
+                      if (children.isNotEmpty) {
+                        return Column(children: children);
+                      }
+                      if (_dirLoading) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 48),
+                          child: Center(
+                            child: SizedBox(
+                                height: 24,
+                                width: 24,
+                                child: CircularProgressIndicator(
+                                    color: AppColors.primary, strokeWidth: 2.5)),
+                          ),
+                        );
+                      }
+                      return const _NoSearchResults();
                     },
                   ),
                 ),
@@ -505,6 +740,99 @@ class _LiveChatRow extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// A small section header used in the inline search results ("Chats" /
+/// "Start new chat").
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 6),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(text.toUpperCase(),
+            style: const TextStyle(
+                color: AppColors.primary,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5)),
+      ),
+    );
+  }
+}
+
+/// A directory-search result row — a Shadow Talk user found by phone number
+/// that you can tap to start a new conversation.
+class _DirUserRow extends StatelessWidget {
+  final DirUser user;
+  final VoidCallback onTap;
+  const _DirUserRow({required this.user, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final peer = User(uid: user.uid, userName: user.name, localPhoto: user.photo);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        child: Row(
+          children: [
+            Avatar(user: peer, size: 56, showBorder: false),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(user.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.white)),
+                  const SizedBox(height: 4),
+                  Text(user.phone.isEmpty ? 'Shadow Talk user' : '+${user.phone}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 15, color: AppColors.textDesc)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.chat_bubble_outline, color: AppColors.primary, size: 22),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown when an inline search matches none of the existing chats.
+class _NoSearchResults extends StatelessWidget {
+  const _NoSearchResults();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(32, 60, 32, 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.search_off_rounded, size: 48, color: AppColors.textDesc),
+          SizedBox(height: 14),
+          Text(
+            'No chats found',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: AppColors.white, fontSize: 17, fontWeight: FontWeight.w600),
+          ),
+        ],
       ),
     );
   }

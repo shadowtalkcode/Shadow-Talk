@@ -16,6 +16,7 @@ import 'screens/splash_screen.dart';
 import 'services/auth_service.dart';
 import 'services/call_service.dart';
 import 'services/chat_service.dart';
+import 'services/notification_settings.dart';
 import 'services/profile_store.dart';
 import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
@@ -37,6 +38,7 @@ void main() async {
   } catch (_) {/* allow the app to run if Firebase isn't configured */}
   await AuthService.instance.init();
   await ProfileStore.instance.init();
+  await NotificationSettings.instance.init();
   // Connect the live chat + calling backends when the user is already signed in.
   if (AuthService.instance.isLoggedIn) {
     ChatService.instance.start().then((_) => CallService.instance.start());
