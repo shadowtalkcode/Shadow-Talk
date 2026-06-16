@@ -89,6 +89,16 @@ class OfflineChatService {
   final ValueNotifier<List<String>> peers = ValueNotifier(const []);
   final ValueNotifier<String> nickname = ValueNotifier('');
 
+  /// Signed Bitcoin transactions received over the mesh (raw tx hex). Lets an
+  /// offline-signed transaction reach this device hop-by-hop; whichever device
+  /// has internet can then broadcast it to the Bitcoin network.
+  final ValueNotifier<List<String>> incomingBtcTransactions =
+      ValueNotifier(const []);
+
+  /// Sentinel prefix marking a mesh MESSAGE that carries a signed BTC tx hex
+  /// rather than chat text. Rides the normal signed + TTL-relayed packet path.
+  static const String _btcTxPrefix = 'BTCTX:';
+
   GATTCharacteristic? _localCharacteristic;
   final List<_Link> _links = [];
   final Map<String, _Peer> _peers = {}; // peerHex → peer
@@ -349,6 +359,52 @@ class OfflineChatService {
     if (bytes != null) await _sendToAll(bytes, null);
   }
 
+  /// Broadcast a signed Bitcoin transaction (raw hex) over the offline mesh.
+  ///
+  /// The hex rides a normal MESSAGE packet (signed, dedup'd, TTL-relayed), so it
+  /// hops device-to-device with no internet. Any peer running this app captures
+  /// it (see [_handleMessage]) and can broadcast it to the Bitcoin network once
+  /// it has connectivity. Returns `true` if there is at least one directly
+  /// linked peer to hand it to (otherwise it went nowhere — warn the user).
+  Future<bool> sendSignedTransaction(String txHex) async {
+    final hex = txHex.trim();
+    if (hex.isEmpty) return false;
+    if (!_started) await init();
+    if (!_identityReady) return false;
+    final packet = BitchatPacket(
+      type: MessageType.message,
+      senderID: _identity.senderID,
+      recipientID: kBroadcastRecipient,
+      timestamp: _now,
+      payload: Uint8List.fromList(utf8.encode('$_btcTxPrefix$hex')),
+      ttl: _ttl,
+    );
+    packet.signature = await _identity.sign(packet.toBinaryDataForSigning()!);
+    _seen.add(_dedupKey(packet));
+    final bytes = BinaryProtocol.encode(packet);
+    if (bytes == null) return false;
+    await _sendToAll(bytes, null);
+    _log('sent signed BTC tx over mesh (${_links.length} link(s))');
+    return _links.isNotEmpty;
+  }
+
+  /// Record a signed BTC tx received over the mesh (deduplicated, capped).
+  void _captureBtcTx(String hex) {
+    final tx = hex.trim();
+    if (tx.isEmpty || incomingBtcTransactions.value.contains(tx)) return;
+    final next = [...incomingBtcTransactions.value, tx];
+    // Keep only the most recent few — these are transient hand-offs.
+    incomingBtcTransactions.value =
+        next.length > 20 ? next.sublist(next.length - 20) : next;
+    _log('captured signed BTC tx from mesh (len=${tx.length})');
+  }
+
+  /// Forget a captured mesh transaction once it has been broadcast/handled.
+  void clearIncomingBtcTransaction(String hex) {
+    incomingBtcTransactions.value =
+        incomingBtcTransactions.value.where((t) => t != hex).toList();
+  }
+
   // ---- Incoming packets --------------------------------------------------
   Future<void> _onReceive(List<int> raw, _Link? from) async {
     final packet = BinaryProtocol.decode(Uint8List.fromList(raw));
@@ -410,6 +466,15 @@ class OfflineChatService {
     final isBroadcast = packet.recipientID == null ||
         _eq(packet.recipientID!, kBroadcastRecipient);
     if (!isBroadcast) return;
+    final text = utf8.decode(packet.payload, allowMalformed: true);
+    // A signed Bitcoin transaction relayed over the mesh — capture it (don't
+    // show it as chat). Handled before the verified-peer gate because the tx is
+    // self-validating: the Bitcoin network checks it on broadcast, so bitchat
+    // identity trust is irrelevant here.
+    if (text.startsWith(_btcTxPrefix)) {
+      _captureBtcTx(text.substring(_btcTxPrefix.length));
+      return;
+    }
     // Android drops public messages from unverified/unknown peers — mirror that.
     final peer = _peers[senderHex];
     if (peer == null || !peer.verified) {
@@ -417,7 +482,6 @@ class OfflineChatService {
       return;
     }
     peer.lastSeen = _now;
-    final text = utf8.decode(packet.payload, allowMalformed: true);
     _append(OfflineMessage(
         sender: peer.nickname,
         text: text,

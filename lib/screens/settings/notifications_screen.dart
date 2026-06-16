@@ -117,7 +117,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 }
 
-/// A row with a label on the left and a Material switch on the right.
 class _ToggleRow extends StatelessWidget {
   final String label;
   final bool value;

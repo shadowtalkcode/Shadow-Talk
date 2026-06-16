@@ -28,6 +28,18 @@ dependencies:
   # Detect physical device vs simulator so real Firebase phone auth runs only
   # where it can (devices), with a local fallback on the simulator.
   device_info_plus: ^11.2.0
+  # Offline Bitcoin (testnet) wallet — pure-Dart so it builds on iOS without
+  # native code. bitcoin_base bundles blockchain_utils, which supplies BIP39
+  # (mnemonic/seed) + BIP32 derivation, P2PKH keys/addresses, and raw-
+  # transaction build/sign. http = blockstream.info testnet API.
+  # Mirrors the Android bitcoinj `offlinebtc` module.
+  bitcoin_base: ^7.1.0
+  # Bundled with bitcoin_base; imported directly for BIP39 mnemonic/seed and
+  # BIP32 key derivation.
+  blockchain_utils: ^6.0.0
+  http: ^1.2.2
+  # QR rendering for the receive address / signed-transaction hand-off.
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:

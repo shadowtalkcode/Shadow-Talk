@@ -227,7 +227,7 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                 ),
                 const SizedBox(height: 14),
                 Text(
-                  "We've sent an SMS to ${widget.phoneNumber.isEmpty ? '+32 *********' : widget.phoneNumber} with a 4-digit verification code",
+                  "We've sent an SMS to ${widget.phoneNumber.isEmpty ? 'your number' : widget.phoneNumber} with a 6-digit verification code",
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 16, color: AppColors.textDesc, height: 1.4),
                 ),
@@ -366,7 +366,12 @@ class _VerifyingOverlayState extends State<_VerifyingOverlay>
   Widget build(BuildContext context) {
     return Positioned.fill(
       child: AbsorbPointer(
-        child: Container(
+        // Wrapped in a (transparent) Material because this overlay is a direct
+        // child of the screen's top-level Stack — without a Material ancestor
+        // Flutter paints the yellow "missing Material" underline under the text.
+        child: Material(
+          type: MaterialType.transparency,
+          child: Container(
           decoration: const BoxDecoration(gradient: AppColors.bgGradient),
           alignment: Alignment.center,
           child: Column(
@@ -387,6 +392,7 @@ class _VerifyingOverlayState extends State<_VerifyingOverlay>
                 ),
               ),
             ],
+          ),
           ),
         ),
       ),
