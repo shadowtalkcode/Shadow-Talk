@@ -1,3 +1,8 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
 import '../models/enums.dart';
@@ -11,8 +16,10 @@ import '../utils/time_format.dart';
 class MessageBubble extends StatelessWidget {
   final Message message;
   final VoidCallback? onLongPress;
+  final VoidCallback? onTap;
 
-  const MessageBubble({super.key, required this.message, this.onLongPress});
+  const MessageBubble(
+      {super.key, required this.message, this.onLongPress, this.onTap});
 
   bool get _sent => message.isSent;
 
@@ -83,6 +90,7 @@ class MessageBubble extends StatelessWidget {
         child: InkWell(
           borderRadius: radius,
           onLongPress: onLongPress,
+          onTap: onTap,
           child: Padding(
             padding: isImage
                 ? const EdgeInsets.all(4)
@@ -156,42 +164,76 @@ class MessageBubble extends StatelessWidget {
   }
 
   Widget _image() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
-      child: Image.asset(
-        message.content,
+    final src = message.content;
+    final uploading = message.transferState == TransferState.loading;
+    final placeholder = Container(
+      width: 250,
+      height: 250,
+      color: Colors.black26,
+      child: const Icon(Icons.image, color: Colors.white54, size: 48),
+    );
+
+    Widget img;
+    if (src.startsWith('http')) {
+      img = Image.network(
+        src,
         width: 250,
         fit: BoxFit.cover,
-        errorBuilder: (context, error, stack) => Container(
-          width: 250,
-          height: 250,
-          color: Colors.black26,
-          child: const Icon(Icons.image, color: Colors.white54, size: 48),
-        ),
+        loadingBuilder: (context, child, progress) => progress == null
+            ? child
+            : Container(
+                width: 250,
+                height: 250,
+                color: Colors.black26,
+                child: const Center(
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white54)),
+              ),
+        errorBuilder: (context, error, stack) => placeholder,
+      );
+    } else if (src.startsWith('/')) {
+      // Local file (an optimistic, still-uploading photo).
+      img = Image.file(File(src),
+          width: 250, fit: BoxFit.cover,
+          errorBuilder: (context, error, stack) => placeholder);
+    } else {
+      img = Image.asset(src,
+          width: 250, fit: BoxFit.cover,
+          errorBuilder: (context, error, stack) => placeholder);
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(22),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Hero only for the uploaded (URL) image, which is what opens
+          // fullscreen — gives the WhatsApp-style zoom-open transition.
+          src.startsWith('http')
+              ? Hero(tag: 'img_${message.messageId}', child: img)
+              : img,
+          if (uploading)
+            Container(
+              width: 250,
+              height: 250,
+              color: Colors.black38,
+              child: const Center(
+                  child: CircularProgressIndicator(color: Colors.white)),
+            ),
+        ],
       ),
     );
   }
 
   Widget _voice() {
-    return SizedBox(
-      width: 250,
-      child: Row(
-        children: [
-          Expanded(child: SizedBox(height: 28, child: _Waveform(sent: _sent))),
-          const SizedBox(width: 12),
-          Text(message.mediaDuration ?? '00:00',
-              style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w600, color: _txt)),
-          const SizedBox(width: 12),
-          Container(
-            width: 48,
-            height: 48,
-            decoration: const BoxDecoration(
-                color: AppColors.primary, shape: BoxShape.circle),
-            child: const Icon(Icons.play_arrow, color: Colors.white, size: 26),
-          ),
-        ],
-      ),
+    final uploading = message.transferState == TransferState.loading;
+    return _VoicePlayer(
+      // http URL once uploaded; a local path while still uploading.
+      url: message.content,
+      durationLabel: message.mediaDuration ?? '00:00',
+      sent: _sent,
+      uploading: uploading,
+      seed: message.messageId,
     );
   }
 
@@ -308,35 +350,189 @@ class _StatusTick extends StatelessWidget {
   }
 }
 
-/// Static purple waveform used for voice bubbles.
-class _Waveform extends StatelessWidget {
+/// WhatsApp-style voice note: a play/pause button, a seekable waveform whose
+/// played bars fill in, and a duration that counts up while playing — with a
+/// small mic icon. Streams the audio from its Storage URL; shows a spinner
+/// while the note is still uploading.
+class _VoicePlayer extends StatefulWidget {
+  final String url;
+  final String durationLabel;
   final bool sent;
-  const _Waveform({required this.sent});
+  final bool uploading;
+  final String seed; // gives each note a stable, distinct waveform shape
 
-  static const _bars = [
-    8, 14, 20, 11, 22, 16, 24, 12, 18, 9, 21, 15, 25, 13, 19, 10, 16, 8,
-    14, 11, 17, 9, 20, 12, 7
-  ];
+  const _VoicePlayer({
+    required this.url,
+    required this.durationLabel,
+    required this.sent,
+    required this.uploading,
+    required this.seed,
+  });
+
+  @override
+  State<_VoicePlayer> createState() => _VoicePlayerState();
+}
+
+class _VoicePlayerState extends State<_VoicePlayer> {
+  static const int _barCount = 26;
+
+  final AudioPlayer _player = AudioPlayer();
+  final List<StreamSubscription> _subs = [];
+  late final List<double> _bars;
+  PlayerState _state = PlayerState.stopped;
+  Duration _pos = Duration.zero;
+  Duration _total = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    final rnd = math.Random(widget.seed.hashCode);
+    _bars = List.generate(_barCount, (_) => 5 + rnd.nextDouble() * 19);
+
+    _subs.add(_player.onPlayerStateChanged.listen((s) {
+      if (mounted) setState(() => _state = s);
+    }));
+    _subs.add(_player.onPositionChanged.listen((p) {
+      if (mounted) setState(() => _pos = p);
+    }));
+    _subs.add(_player.onDurationChanged.listen((d) {
+      if (mounted) setState(() => _total = d);
+    }));
+    _subs.add(_player.onPlayerComplete.listen((_) {
+      if (mounted) {
+        setState(() {
+          _state = PlayerState.stopped;
+          _pos = Duration.zero;
+        });
+      }
+    }));
+  }
+
+  @override
+  void dispose() {
+    for (final s in _subs) {
+      s.cancel();
+    }
+    _player.dispose();
+    super.dispose();
+  }
+
+  bool get _playable => !widget.uploading && widget.url.startsWith('http');
+
+  Future<void> _toggle() async {
+    if (!_playable) return;
+    if (_state == PlayerState.playing) {
+      await _player.pause();
+    } else {
+      await _player.play(UrlSource(widget.url));
+    }
+  }
+
+  void _seekToFraction(double f) {
+    if (!_playable || _total.inMilliseconds == 0) return;
+    final clamped = f.clamp(0.0, 1.0);
+    _player.seek(Duration(milliseconds: (clamped * _total.inMilliseconds).round()));
+  }
+
+  static String _fmt(Duration d) {
+    final m = d.inMinutes.toString().padLeft(2, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 0; i < _bars.length; i++)
-          Container(
-            width: 3,
-            height: _bars[i].toDouble(),
-            margin: const EdgeInsets.symmetric(horizontal: 1.2),
-            decoration: BoxDecoration(
-              color: i < _bars.length * 0.55
-                  ? (sent ? Colors.white : AppColors.primary)
-                  : AppColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(2),
+    final txt =
+        widget.sent ? AppColors.sentMessageText : AppColors.receivedMessageText;
+    final played = widget.sent ? Colors.white : AppColors.primary;
+    final unplayed =
+        widget.sent ? Colors.white.withValues(alpha: 0.45) : AppColors.surfaceAlt;
+    final playing = _state == PlayerState.playing;
+    final progress = _total.inMilliseconds > 0
+        ? (_pos.inMilliseconds / _total.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+    final label = (playing || _pos > Duration.zero)
+        ? _fmt(_pos)
+        : widget.durationLabel;
+
+    return SizedBox(
+      width: 232,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Play / pause / uploading button.
+          GestureDetector(
+            onTap: _toggle,
+            child: SizedBox(
+              width: 40,
+              height: 40,
+              child: widget.uploading
+                  ? Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.4, color: played),
+                    )
+                  : Icon(playing ? Icons.pause_circle_filled : Icons.play_circle_fill,
+                      color: played, size: 40),
             ),
           ),
-      ],
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Seekable waveform.
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final w = constraints.maxWidth;
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapDown: (d) => _seekToFraction(d.localPosition.dx / w),
+                      onHorizontalDragUpdate: (d) =>
+                          _seekToFraction(d.localPosition.dx / w),
+                      child: SizedBox(
+                        height: 26,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            for (var i = 0; i < _bars.length; i++)
+                              Expanded(
+                                child: Center(
+                                  child: Container(
+                                    height: _bars[i],
+                                    margin:
+                                        const EdgeInsets.symmetric(horizontal: 1),
+                                    decoration: BoxDecoration(
+                                      color: (i / _bars.length) <= progress
+                                          ? played
+                                          : unplayed,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text(label,
+                        style: TextStyle(
+                            fontSize: 12, color: txt.withValues(alpha: 0.85))),
+                    const Spacer(),
+                    Icon(Icons.mic, size: 15, color: txt.withValues(alpha: 0.7)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

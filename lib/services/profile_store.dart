@@ -12,6 +12,7 @@ class ProfileStore extends ChangeNotifier {
   static const _kName = 'st_profile_name';
   static const _kAbout = 'st_profile_about';
   static const _kPhoto = 'st_profile_photo';
+  static const _kPhotoUrl = 'st_profile_photo_url';
   static const _kPhone = 'st_profile_phone';
 
   static const defaultAbout = 'Hey there! I am using Shadow Talk.';
@@ -27,23 +28,29 @@ class ProfileStore extends ChangeNotifier {
   }
 
   String? get photoPath => _prefs?.getString(_kPhoto);
+
+  /// Uploaded profile-photo download URL (so other devices can show it).
+  String? get photoUrl => _prefs?.getString(_kPhotoUrl);
   String get phone => _prefs?.getString(_kPhone) ?? '';
 
   Future<void> save({
     String? name,
     String? about,
     String? photoPath,
+    String? photoUrl,
     String? phone,
   }) async {
     if (name != null) await _prefs?.setString(_kName, name);
     if (about != null) await _prefs?.setString(_kAbout, about);
     if (photoPath != null) await _prefs?.setString(_kPhoto, photoPath);
+    if (photoUrl != null) await _prefs?.setString(_kPhotoUrl, photoUrl);
     if (phone != null) await _prefs?.setString(_kPhone, phone);
     notifyListeners();
   }
 
   Future<void> clearPhoto() async {
     await _prefs?.remove(_kPhoto);
+    await _prefs?.remove(_kPhotoUrl);
     notifyListeners();
   }
 
@@ -52,6 +59,7 @@ class ProfileStore extends ChangeNotifier {
     await _prefs?.remove(_kName);
     await _prefs?.remove(_kAbout);
     await _prefs?.remove(_kPhoto);
+    await _prefs?.remove(_kPhotoUrl);
     await _prefs?.remove(_kPhone);
     notifyListeners();
   }

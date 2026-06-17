@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -109,8 +111,14 @@ class _ChatScreenState extends State<ChatScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToBottom(animate: true));
   }
 
-  void _onVoice() {
-    _repo.sendMedia(widget.chatId, MessageKind.voice, mediaDuration: '00:08');
+  void _onVoiceRecorded(File file, int durationMs) {
+    final secs = (durationMs / 1000).round();
+    final label =
+        '${(secs ~/ 60).toString().padLeft(2, '0')}:${(secs % 60).toString().padLeft(2, '0')}';
+    _repo.sendMedia(widget.chatId, MessageKind.voice, mediaDuration: label);
+    try {
+      if (file.existsSync()) file.deleteSync();
+    } catch (_) {}
     WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToBottom(animate: true));
   }
 
@@ -219,7 +227,8 @@ class _ChatScreenState extends State<ChatScreen> {
             },
           ),
           if (_replyTo != null) _replyPreview(),
-          ChatInputBar(onSend: _send, onAttach: _onAttach, onVoice: _onVoice),
+          ChatInputBar(
+              onSend: _send, onAttach: _onAttach, onVoiceRecorded: _onVoiceRecorded),
         ],
       ),
     );

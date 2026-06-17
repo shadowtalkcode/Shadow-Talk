@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 
 import 'auth_service.dart';
@@ -22,9 +24,10 @@ class LiveMessage {
   final String from;
   final String to;
   final String text;
-  final String type; // 'text' | 'image' | ...
+  final String type; // 'text' | 'image' | 'voice' | ...
   final int ts;
   final int status;
+  final int durationMs; // voice/audio length, 0 otherwise
 
   LiveMessage({
     required this.id,
@@ -34,6 +37,7 @@ class LiveMessage {
     required this.type,
     required this.ts,
     required this.status,
+    this.durationMs = 0,
   });
 
   bool isSentBy(String? uid) => from == uid;
@@ -46,6 +50,7 @@ class LiveMessage {
         type: (data['type'] ?? 'text').toString(),
         ts: (data['ts'] is int) ? data['ts'] as int : 0,
         status: (data['status'] is int) ? data['status'] as int : MsgStat.sent,
+        durationMs: (data['duration'] is int) ? data['duration'] as int : 0,
       );
 }
 
@@ -114,8 +119,25 @@ class ChatService {
   String? _uid;
   bool _ready = false;
 
+  // In-memory caches so screens render INSTANTLY (no spinner) while the live
+  // stream refreshes in the background — the WhatsApp-style "open is instant".
+  final Map<String, DirUser> _userCache = {};
+  List<ChatSummary> _chatsCache = const [];
+  final Map<String, List<LiveMessage>> _messagesCache = {};
+
   String? get uid => _uid;
   bool get isReady => _ready;
+
+  /// Last-known chat list (for StreamBuilder initialData).
+  List<ChatSummary> get cachedChats => _chatsCache;
+
+  /// Last-known messages for a conversation (for StreamBuilder initialData).
+  List<LiveMessage> cachedMessages(String peerUid) =>
+      _messagesCache[chatIdWith(peerUid)] ?? const [];
+
+  /// Synchronously returns a cached user profile if we've fetched it (e.g. the
+  /// chat list / directory populated it) — used to show a peer's CURRENT photo.
+  DirUser? cachedUser(String uid) => _userCache[uid];
 
   DatabaseReference get _root => _db.ref();
 
@@ -150,6 +172,11 @@ class ChatService {
     try {
       await registerSelf();
       await _setupPresence();
+      // Keep the chat index synced to disk in the background so the chat list
+      // is warm and opens instantly next time.
+      try {
+        _indexRef(_uid!).keepSynced(true);
+      } catch (_) {}
       _ready = true;
       _log('start → ready as uid=$_uid');
     } catch (e) {
@@ -157,6 +184,26 @@ class ChatService {
       _log('start → setup failed (rules?): $e');
     }
     return _uid;
+  }
+
+  /// Upload the user's profile photo to Storage and persist its download URL
+  /// (so peers can render it), then propagate it to `users/{uid}`. Returns the
+  /// URL, or null on failure.
+  Future<String?> setProfilePhoto(File file) async {
+    if (!_ready) await start();
+    final uid = _uid;
+    if (uid == null) return null;
+    try {
+      final ref = FirebaseStorage.instance.ref('profilePhotos/$uid.jpg');
+      await ref.putFile(file);
+      final url = await ref.getDownloadURL();
+      await ProfileStore.instance.save(photoUrl: url);
+      await registerSelf();
+      return url;
+    } catch (e) {
+      _log('setProfilePhoto failed: $e');
+      return null;
+    }
   }
 
   /// Writes the current user's directory entry from the saved profile + phone.
@@ -170,7 +217,9 @@ class ChatService {
       'uid': uid,
       'name': name,
       'phone': phone,
-      'photoUrl': p.photoPath ?? '',
+      // The uploaded download URL (not the device-local path) so peers can load
+      // it. Empty until the user picks a photo (then setProfilePhoto fills it).
+      'photoUrl': p.photoUrl ?? '',
       'updatedAt': ServerValue.timestamp,
     });
     if (phone.isNotEmpty) {
@@ -206,44 +255,118 @@ class ChatService {
   }
 
   Future<DirUser?> getUser(String uid) async {
+    // Serve from cache instantly; this is hit once per chat in the list, so
+    // caching keeps the chat list from re-fetching every profile on each update.
+    final cached = _userCache[uid];
+    if (cached != null) return cached;
     final snap = await _root.child('users').child(uid).get();
     if (!snap.exists || snap.value is! Map) return null;
     final m = snap.value as Map;
-    return DirUser(
+    final user = DirUser(
       uid: uid,
       name: (m['name'] ?? 'User').toString(),
       phone: (m['phone'] ?? '').toString(),
       photo: (m['photoUrl'] ?? '').toString().isEmpty ? null : m['photoUrl'].toString(),
     );
+    _userCache[uid] = user;
+    return user;
+  }
+
+  /// Live directory of every registered Shadow Talk user except yourself.
+  ///
+  /// Lets people discover each other without typing an exact phone number —
+  /// once two devices register, each appears in the other's New Chat list.
+  Stream<List<DirUser>> usersStream() {
+    return _root.child('users').onValue.map((event) {
+      final val = event.snapshot.value;
+      if (val is! Map) return <DirUser>[];
+      final me = _uid;
+      final list = <DirUser>[];
+      val.forEach((key, v) {
+        if (v is! Map) return;
+        final uid = (v['uid'] ?? key).toString();
+        if (uid.isEmpty || uid == me) return; // skip self
+        list.add(DirUser(
+          uid: uid,
+          name: (v['name'] ?? 'User').toString(),
+          phone: (v['phone'] ?? '').toString(),
+          photo: (v['photoUrl'] ?? '').toString().isEmpty
+              ? null
+              : v['photoUrl'].toString(),
+        ));
+      });
+      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      return list;
+    });
   }
 
   // ---- Messages ----------------------------------------------------------
   Future<void> sendText(String peerUid, String text, {String type = 'text'}) async {
+    if (text.trim().isEmpty) return;
+    await _postMessage(peerUid, text: text.trim(), type: type, preview: text.trim());
+  }
+
+  /// Pick→send an image: upload to Storage, then post an `image` message whose
+  /// `text` is the download URL. Mirrors the Android media-message flow.
+  Future<void> sendImage(String peerUid, File file) async {
+    final url = await _uploadMedia(peerUid, file, 'jpg');
+    await _postMessage(peerUid,
+        text: url, type: 'image', preview: '📷 Photo');
+  }
+
+  /// Record→send a voice note: upload the audio, post a `voice` message with the
+  /// URL and its duration (ms) so the bubble can show a player.
+  Future<void> sendVoice(String peerUid, File file, int durationMs) async {
+    final url = await _uploadMedia(peerUid, file, 'm4a');
+    await _postMessage(peerUid,
+        text: url,
+        type: 'voice',
+        preview: '🎤 Voice message',
+        extra: {'duration': durationMs});
+  }
+
+  Future<String> _uploadMedia(String peerUid, File file, String ext) async {
+    final chatId = chatIdWith(peerUid);
+    final id = '${DateTime.now().microsecondsSinceEpoch}';
+    final ref = FirebaseStorage.instance.ref('chatMedia/$chatId/$id.$ext');
+    final task = await ref.putFile(file);
+    return task.ref.getDownloadURL();
+  }
+
+  /// Write a message + update both users' chat index. [preview] is the short
+  /// text shown in the chat list (e.g. "📷 Photo").
+  Future<void> _postMessage(
+    String peerUid, {
+    required String text,
+    required String type,
+    required String preview,
+    Map<String, Object?> extra = const {},
+  }) async {
     final uid = _uid;
-    if (uid == null || text.trim().isEmpty) return;
+    if (uid == null) return;
     final chatId = chatIdWith(peerUid);
     final ref = _convRef(chatId).child('messages').push();
-    final msg = {
+    await ref.set({
       'from': uid,
       'to': peerUid,
-      'text': text.trim(),
+      'text': text,
       'type': type,
       'ts': ServerValue.timestamp,
       'status': MsgStat.sent,
-    };
-    await ref.set(msg);
+      ...extra,
+    });
 
     // Update both users' chat index.
     final now = DateTime.now().millisecondsSinceEpoch;
     await _indexRef(uid).child(peerUid).update({
-      'lastText': text.trim(),
+      'lastText': preview,
       'lastTs': now,
       'lastFromMe': true,
       'unread': 0,
     });
     final peerIndex = _indexRef(peerUid).child(uid);
     await peerIndex.update({
-      'lastText': text.trim(),
+      'lastText': preview,
       'lastTs': now,
       'lastFromMe': false,
     });
@@ -256,11 +379,12 @@ class ChatService {
   /// Live messages for a conversation, ordered oldest→newest.
   Stream<List<LiveMessage>> messages(String peerUid) {
     final chatId = chatIdWith(peerUid);
-    return _convRef(chatId)
-        .child('messages')
-        .orderByChild('ts')
-        .onValue
-        .map((event) {
+    final ref = _convRef(chatId).child('messages');
+    // Keep this conversation warm on disk so reopening it is instant.
+    try {
+      ref.keepSynced(true);
+    } catch (_) {}
+    return ref.orderByChild('ts').onValue.map((event) {
       final out = <LiveMessage>[];
       final val = event.snapshot.value;
       if (val is Map) {
@@ -269,6 +393,7 @@ class ChatService {
         });
         out.sort((a, b) => a.ts.compareTo(b.ts));
       }
+      _messagesCache[chatId] = out; // for instant initialData next open
       return out;
     }).handleError((Object e) => _log('messages stream closed: $e'));
   }
@@ -359,6 +484,7 @@ class ChatService {
         }
         summaries.sort((a, b) => b.lastTs.compareTo(a.lastTs));
       }
+      _chatsCache = summaries;
       return summaries;
     }).handleError((Object e) {
       // Swallow permission-denied that fires right after sign-out / account

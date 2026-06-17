@@ -39,7 +39,8 @@ class _MainScreenState extends State<MainScreen> {
   ];
 
   static const _items = [
-    (Icons.forum_rounded, 'Chats'),
+    // Single speech-bubble to match the Android bottom nav (ic_chat_bottom).
+    (Icons.chat_bubble_outline_rounded, 'Chats'),
     (Icons.call, 'Calls'),
     (Icons.currency_bitcoin, 'Bitcoin'),
     (Icons.settings, 'Settings'),

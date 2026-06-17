@@ -5,7 +5,8 @@ class User {
   String userName;
   String status; // "about" text
   String phone;
-  String? localPhoto; // asset path used as avatar in this port
+  String? localPhoto; // asset/file path used as avatar in this port
+  String? photoUrl; // uploaded profile photo (network URL), if any
   bool isGroup;
   bool isBlocked;
   bool isStoredInContacts;
@@ -16,6 +17,7 @@ class User {
     this.status = 'Hey there! I am using Shadow Talk.',
     this.phone = '',
     this.localPhoto,
+    this.photoUrl,
     this.isGroup = false,
     this.isBlocked = false,
     this.isStoredInContacts = true,

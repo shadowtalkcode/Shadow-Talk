@@ -73,7 +73,7 @@ class ContactDetailsScreen extends StatelessWidget {
                             onPressed: () => startCall(context,
                                 peerUid: user.uid,
                                 peerName: user.userName,
-                                peerPhoto: user.localPhoto,
+                                peerPhoto: user.photoUrl ?? user.localPhoto,
                                 isVideo: true),
                           ),
                           const SizedBox(width: 4),
@@ -82,7 +82,7 @@ class ContactDetailsScreen extends StatelessWidget {
                             onPressed: () => startCall(context,
                                 peerUid: user.uid,
                                 peerName: user.userName,
-                                peerPhoto: user.localPhoto,
+                                peerPhoto: user.photoUrl ?? user.localPhoto,
                                 isVideo: false),
                           ),
                         ],
@@ -149,16 +149,24 @@ class ContactDetailsScreen extends StatelessWidget {
   }
 
   Widget _photoHeader() {
-    if (user.localPhoto != null) {
-      return Image.asset(user.localPhoto!, fit: BoxFit.cover,
-          errorBuilder: (context, error, stack) => Container(color: AppColors.surface));
-    }
-    return Container(
+    final url = user.photoUrl;
+    final placeholder = Container(
       color: AppColors.surface,
       alignment: Alignment.center,
       child: Icon(user.isGroup ? Icons.groups_rounded : Icons.person,
           size: 120, color: AppColors.iconTint),
     );
+    if (url != null && url.startsWith('http')) {
+      return Image.network(url,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stack) => placeholder);
+    }
+    if (user.localPhoto != null) {
+      return Image.asset(user.localPhoto!,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stack) => placeholder);
+    }
+    return placeholder;
   }
 }
 

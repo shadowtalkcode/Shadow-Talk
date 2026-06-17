@@ -12,6 +12,12 @@ dependencies:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
+  # Voice messages: record audio + play it back (chat voice notes).
+  # Pinned to record 4.x (monolithic plugin) — record 5.x is federated and its
+  # transitive record_linux pulls an incompatible platform-interface that
+  # breaks the iOS kernel compile.
+  record: ^4.4.4
+  audioplayers: ^6.1.0
   firebase_core:
   firebase_auth:
   firebase_database:
@@ -40,6 +46,10 @@ dependencies:
   http: ^1.2.2
   # QR rendering for the receive address / signed-transaction hand-off.
   qr_flutter: ^4.1.0
+  # Fullscreen photo viewer actions: save a chat photo to the device gallery
+  # and share it via the OS share sheet (WhatsApp-style).
+  gal: ^2.3.0
+  share_plus: ^10.1.2
 
 dev_dependencies:
   flutter_test:

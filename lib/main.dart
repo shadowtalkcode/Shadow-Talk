@@ -1,4 +1,5 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -35,6 +36,12 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
     await Firebase.initializeApp();
+    // Offline persistence: serve last-known chats/messages from disk instantly
+    // on launch (and keep working offline) instead of waiting for the network
+    // every time — this is what makes the chat list + conversations open fast.
+    // Must be set before any database access.
+    FirebaseDatabase.instance.setPersistenceEnabled(true);
+    FirebaseDatabase.instance.setPersistenceCacheSizeBytes(40 * 1024 * 1024);
   } catch (_) {/* allow the app to run if Firebase isn't configured */}
   await AuthService.instance.init();
   await ProfileStore.instance.init();

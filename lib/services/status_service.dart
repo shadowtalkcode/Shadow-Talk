@@ -229,9 +229,12 @@ class StatusService {
       isMine: true,
     ));
 
-    // Chat partners' tales.
-    final partners = await _chatPartners();
-    for (final p in partners) {
+    // Everyone else's tales. Android scopes statuses to your phone contacts;
+    // this port has no contact book, so — like the New Chat directory — it
+    // shows every registered user who has an active status. That's why two
+    // people now see each other's status without having chatted first.
+    final others = await _statusCandidates(me);
+    for (final p in others) {
       final items = await statusesOf(p);
       if (items.isEmpty) continue;
       final user = await ChatService.instance.getUser(p);
@@ -252,18 +255,31 @@ class StatusService {
     return [tales.first, ...friends];
   }
 
-  Future<List<String>> _chatPartners() async {
-    final me = _uid;
-    if (me == null) return [];
+  /// UIDs whose statuses we should consider: every registered user except me,
+  /// plus anyone I've chatted with (covers users who registered before the
+  /// directory existed). Deduplicated.
+  Future<List<String>> _statusCandidates(String me) async {
+    final uids = <String>{};
     try {
-      // The per-user chat index lives under the open `messages/` subtree (the
-      // security rules deny top-level `userChats`). Mirrors ChatService.
-      final snap = await _root.child('messages').child('index').child(me).get();
-      if (snap.value is Map) {
-        return (snap.value as Map).keys.map((k) => k.toString()).toList();
+      final usersSnap = await _root.child('users').get();
+      if (usersSnap.value is Map) {
+        (usersSnap.value as Map).forEach((k, v) {
+          final uid = (v is Map && v['uid'] != null) ? v['uid'].toString() : k.toString();
+          if (uid.isNotEmpty && uid != me) uids.add(uid);
+        });
       }
     } catch (_) {}
-    return [];
+    try {
+      // The per-user chat index lives under the open `messages/` subtree.
+      final snap = await _root.child('messages').child('index').child(me).get();
+      if (snap.value is Map) {
+        for (final k in (snap.value as Map).keys) {
+          final uid = k.toString();
+          if (uid != me) uids.add(uid);
+        }
+      }
+    } catch (_) {}
+    return uids.toList();
   }
 
   // ---- Seen tracking -----------------------------------------------------

@@ -22,6 +22,19 @@
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>firebase-phone-auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>app-1-1080714243490-ios-02c83b51234c3ed68456fb</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
@@ -34,6 +47,8 @@
 	<string>Shadow Talk needs access to your camera for video calls and to take a profile picture.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Shadow Talk needs access to your microphone for voice and video calls.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Shadow Talk saves photos you receive in chats to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Shadow Talk needs access to your photos so you can set a profile picture.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

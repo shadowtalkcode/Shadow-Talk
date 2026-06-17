@@ -19,16 +19,38 @@ class _NewChatScreenState extends State<NewChatScreen> {
   final _searchCtrl = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    // Make sure the backend is connected so the directory + presence stream.
+    if (!ChatService.instance.isReady) {
+      ChatService.instance.start().then((_) {
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _openChat(DirUser user) {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => LiveChatScreen(
+          peerUid: user.uid,
+          peerName: user.name,
+          peerPhoto: user.photo,
+        ),
+      ),
+    );
   }
 
   Future<void> _findAndOpen() async {
     final phone = _searchCtrl.text.trim();
     if (phone.isEmpty) return;
     final messenger = ScaffoldMessenger.of(context);
-    final navigator = Navigator.of(context);
     if (!ChatService.instance.isReady) {
       await ChatService.instance.start();
     }
@@ -44,15 +66,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
       messenger.showSnackBar(const SnackBar(content: Text("That's your own number")));
       return;
     }
-    navigator.pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => LiveChatScreen(
-          peerUid: user.uid,
-          peerName: user.name,
-          peerPhoto: user.photo,
-        ),
-      ),
-    );
+    _openChat(user);
   }
 
   @override
@@ -115,42 +129,66 @@ class _NewChatScreenState extends State<NewChatScreen> {
             ),
         ],
       ),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.person, size: 200, color: Color(0xFF4A4F5C)),
-            const SizedBox(height: 8),
-            const Text('No Shadow Talk Contacts',
-                style: TextStyle(
-                    color: AppColors.white, fontSize: 19, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 6),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 40),
-              child: Text('Tap search to start a chat by phone number',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: AppColors.textDesc, fontSize: 14)),
-            ),
-            const SizedBox(height: 24),
-            Material(
-              color: AppColors.primary,
-              child: InkWell(
-                onTap: (){
-                  _showInviteDialog(context);
-                },
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 36, vertical: 16),
-                  child: Text('INVITE FRIENDS',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1)),
-                ),
+      body: StreamBuilder<List<DirUser>>(
+        stream: ChatService.instance.usersStream(),
+        builder: (context, snapshot) {
+          final users = snapshot.data ?? const <DirUser>[];
+          if (users.isEmpty) return _emptyState();
+          return ListView(
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text('Shadow Talk users',
+                    style: TextStyle(
+                        color: AppColors.textDesc,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5)),
+              ),
+              for (final u in users) _UserTile(user: u, onTap: () => _openChat(u)),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _emptyState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.person, size: 200, color: Color(0xFF4A4F5C)),
+          const SizedBox(height: 8),
+          const Text('No Shadow Talk Contacts yet',
+              style: TextStyle(
+                  color: AppColors.white, fontSize: 19, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 6),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+                'When someone else registers, they appear here automatically. '
+                'You can also tap search to find a user by phone number.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.textDesc, fontSize: 14)),
+          ),
+          const SizedBox(height: 24),
+          Material(
+            color: AppColors.primary,
+            child: InkWell(
+              onTap: () => _showInviteDialog(context),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 36, vertical: 16),
+                child: Text('INVITE FRIENDS',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1)),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -207,6 +245,70 @@ class _NewChatScreenState extends State<NewChatScreen> {
   void _invite() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Invite link copied — share it with friends!')),
+    );
+  }
+}
+
+/// A single registered user in the directory — avatar, name, phone and a live
+/// online dot — tappable to open a chat.
+class _UserTile extends StatelessWidget {
+  final DirUser user;
+  final VoidCallback onTap;
+  const _UserTile({required this.user, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = user.name.isEmpty ? '?' : user.name.characters.first.toUpperCase();
+    return ListTile(
+      onTap: onTap,
+      leading: SizedBox(
+        width: 48,
+        height: 48,
+        child: Stack(
+          children: [
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: AppColors.primary.withValues(alpha: 0.25),
+              backgroundImage: (user.photo != null && user.photo!.startsWith('http'))
+                  ? NetworkImage(user.photo!)
+                  : null,
+              child: (user.photo == null || !user.photo!.startsWith('http'))
+                  ? Text(initial,
+                      style: const TextStyle(
+                          color: AppColors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700))
+                  : null,
+            ),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: StreamBuilder<Presence>(
+                stream: ChatService.instance.presenceOf(user.uid),
+                builder: (context, snap) {
+                  final online = snap.data?.online ?? false;
+                  if (!online) return const SizedBox.shrink();
+                  return Container(
+                    width: 13,
+                    height: 13,
+                    decoration: BoxDecoration(
+                      color: AppColors.green,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.background, width: 2),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      title: Text(user.name,
+          style: const TextStyle(
+              color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+      subtitle: Text(user.phone.isEmpty ? 'Shadow Talk user' : user.phone,
+          style: const TextStyle(color: AppColors.textDesc, fontSize: 13)),
+      trailing: const Icon(Icons.chat_bubble_outline, color: AppColors.primary, size: 20),
     );
   }
 }

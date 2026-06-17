@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../models/user.dart';
@@ -44,16 +46,37 @@ class Avatar extends StatelessWidget {
         ? Border.all(color: const Color(0xFFBDBDBD), width: 1)
         : null;
 
+    final localPhoto = user.localPhoto;
+    final photoUrl = user.photoUrl;
+
     Widget inner;
-    if (user.isGroup && user.localPhoto == null) {
+    if (user.isGroup && localPhoto == null && photoUrl == null) {
       inner = Container(
         color: AppColors.surface,
         alignment: Alignment.center,
         child: Icon(Icons.groups_rounded, size: size * 0.55, color: AppColors.iconTint),
       );
-    } else if (user.localPhoto != null) {
+    } else if (photoUrl != null && photoUrl.startsWith('http')) {
+      // Uploaded profile photo (shown across devices). Falls back to initials.
+      inner = Image.network(
+        photoUrl,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stack) => _initialsAvatar(),
+      );
+    } else if (localPhoto != null && localPhoto.startsWith('/')) {
+      // Local file path (this device's own freshly-picked photo).
+      inner = Image.file(
+        File(localPhoto),
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stack) => _initialsAvatar(),
+      );
+    } else if (localPhoto != null) {
       inner = Image.asset(
-        user.localPhoto!,
+        localPhoto,
         width: size,
         height: size,
         fit: BoxFit.cover,

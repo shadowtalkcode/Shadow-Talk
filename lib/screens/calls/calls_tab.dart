@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/call.dart';
 import '../../models/user.dart';
 import '../../services/call_service.dart';
+import '../../services/chat_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/time_format.dart';
 import '../../widgets/avatar.dart';
@@ -103,14 +104,25 @@ class _CallRow extends StatelessWidget {
       CallDirection.outgoing => (Icons.call_made, AppColors.green, 'Outgoing'),
       CallDirection.missed => (Icons.call_missed, AppColors.red, 'Missed'),
     };
-    final user = User(
-      uid: call.peerUid,
-      userName: call.peerName,
-      localPhoto: call.peerPhoto,
-    );
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
-      leading: Avatar(user: user, size: 54, showBorder: false),
+      // Resolve the peer's CURRENT photo (cached-instant) so old call rows also
+      // show it; fall back to the photo captured at call time, then initials.
+      leading: FutureBuilder<DirUser?>(
+        future: ChatService.instance.getUser(call.peerUid),
+        initialData: ChatService.instance.cachedUser(call.peerUid),
+        builder: (context, snap) {
+          final photo = snap.data?.photo ?? call.peerPhoto;
+          return Avatar(
+            user: User(
+                uid: call.peerUid,
+                userName: snap.data?.name ?? call.peerName,
+                photoUrl: photo),
+            size: 54,
+            showBorder: false,
+          );
+        },
+      ),
       onTap: () => startCall(context,
           peerUid: call.peerUid,
           peerName: call.peerName,

@@ -4,14 +4,19 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   agora_rtc_engine
+  audioplayers_windows
   bluetooth_low_energy_windows
   file_selector_windows
   firebase_auth
   firebase_core
   firebase_database
   firebase_storage
+  gal
   iris_method_channel
   permission_handler_windows
+  record_windows
+  share_plus
+  url_launcher_windows
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

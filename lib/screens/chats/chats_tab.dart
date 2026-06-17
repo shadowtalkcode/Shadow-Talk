@@ -290,6 +290,9 @@ class _ChatsTabState extends State<ChatsTab> {
                 SliverToBoxAdapter(
                   child: StreamBuilder<List<ChatSummary>>(
                     stream: _chatsStream,
+                    // Show the last-known chat list instantly (no spinner/flash)
+                    // while the live stream refreshes.
+                    initialData: _chat.cachedChats,
                     builder: (context, snap) {
                       final all = snap.data ?? const <ChatSummary>[];
 
@@ -302,7 +305,14 @@ class _ChatsTabState extends State<ChatsTab> {
 
                       // Normal mode: existing chats (or the empty state).
                       if (!_searching) {
-                        if (all.isEmpty) return _EmptyChats(onStart: _newChat);
+                        if (all.isEmpty) {
+                          // Don't flash the "no chats" state before the first
+                          // load arrives — show nothing until we actually know.
+                          if (snap.connectionState == ConnectionState.waiting) {
+                            return const SizedBox.shrink();
+                          }
+                          return _EmptyChats(onStart: _newChat);
+                        }
                         return Column(
                           children: [
                             for (final c in all)
@@ -678,7 +688,10 @@ class _LiveChatRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final peer = User(uid: summary.peerUid, userName: summary.peerName, localPhoto: summary.peerPhoto);
+    final peer = User(
+        uid: summary.peerUid,
+        userName: summary.peerName,
+        photoUrl: summary.peerPhoto);
     final unread = summary.unread;
     return InkWell(
       onTap: onTap,

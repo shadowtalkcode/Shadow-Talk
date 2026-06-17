@@ -60,8 +60,23 @@ class AuthService {
     _prefs = await SharedPreferences.getInstance();
     await _detectDevice();
     await _clearStaleSessionOnFreshInstall();
+    // Apply the test-mode setting as early as possible (debug/profile) so the
+    // Firebase-console test phone numbers skip the iOS app-verification step
+    // that otherwise crashes when there's no APNs key / reCAPTCHA URL scheme.
+    await _applyTestVerificationSetting();
     _log('init — isLoggedIn=$isLoggedIn, profileCompleted=$profileCompleted, '
         'useRealPhoneAuth=$_useRealPhoneAuth (physical=$_isPhysicalDevice)');
+  }
+
+  /// In non-release builds, disable Firebase phone app-verification so the
+  /// allowlisted test numbers configured in the console can sign in on a real
+  /// device without APNs/reCAPTCHA (and without the native nil-unwrap crash).
+  Future<void> _applyTestVerificationSetting() async {
+    try {
+      await _auth.setSettings(appVerificationDisabledForTesting: !kReleaseMode);
+    } catch (e) {
+      _log('setSettings(appVerificationDisabledForTesting) failed: $e');
+    }
   }
 
   /// Detects whether we're on a physical device or a simulator/emulator.
@@ -173,7 +188,12 @@ class AuthService {
     }
 
     try {
-      _log('verifyPhone → calling FirebaseAuth.verifyPhoneNumber …');
+      // Re-assert test-mode right before verifying (the console test numbers
+      // skip app verification, avoiding the APNs/reCAPTCHA nil-unwrap crash).
+      await _applyTestVerificationSetting();
+
+      _log('verifyPhone → calling FirebaseAuth.verifyPhoneNumber '
+          '(appVerificationDisabledForTesting=${!kReleaseMode}) …');
       await _auth.verifyPhoneNumber(
         phoneNumber: phoneNumber,
         timeout: const Duration(seconds: 60),

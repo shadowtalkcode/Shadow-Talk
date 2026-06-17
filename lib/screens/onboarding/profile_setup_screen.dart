@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../services/auth_service.dart';
+import '../../services/chat_service.dart';
 import '../../services/profile_store.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/image_storage.dart';
@@ -114,6 +115,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       phone: AuthService.instance.phoneNumber,
     );
     await AuthService.instance.setProfileCompleted(true);
+    // Upload the profile photo in the background so other users can see it
+    // (onboarding stays snappy; the URL propagates when the upload finishes).
+    final photo = _photo;
+    if (photo != null) {
+      ChatService.instance.setProfilePhoto(photo);
+    }
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const MainScreen()),

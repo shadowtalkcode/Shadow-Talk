@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../services/chat_service.dart';
 import '../../services/profile_store.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/image_storage.dart';
@@ -22,6 +23,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _store = ProfileStore.instance;
 
   late File? _photo = _initialPhoto();
+  bool _uploading = false;
 
   // Ignore a stored path whose file no longer exists (e.g. an old image_picker
   // temp path that iOS purged) so we never feed a missing file to FileImage.
@@ -35,6 +37,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late final TextEditingController _about =
       TextEditingController(text: _store.about);
   late final String _phone = _store.phone;
+
+  @override
+  void initState() {
+    super.initState();
+    // Self-heal: if a photo was set (e.g. during onboarding) but its upload
+    // never finished (no durable URL yet) while the local file still exists,
+    // upload it now so it survives the local file being purged + reaches peers.
+    final f = _photo;
+    if ((_store.photoUrl == null || _store.photoUrl!.isEmpty) &&
+        f != null &&
+        f.existsSync()) {
+      ChatService.instance.setProfilePhoto(f);
+    }
+  }
 
   @override
   void dispose() {
@@ -80,16 +96,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final file = await _picker.pickImage(
           source: source, maxWidth: 1024, maxHeight: 1024, imageQuality: 85);
-      if (file != null) {
-        final path = await ImageStorage.persist(file.path);
-        if (!mounted) return;
-        setState(() => _photo = File(path));
-        await _store.save(photoPath: path);
-      }
+      if (file == null) return;
+      final path = await ImageStorage.persist(file.path);
+      if (!mounted) return;
+      // Show the new photo immediately + a spinner while it uploads.
+      setState(() {
+        _photo = File(path);
+        _uploading = true;
+      });
+      await _store.save(photoPath: path);
+      // Upload so other users see it (and so it survives the local file being
+      // purged by iOS later — the durable URL is the reliable source).
+      await ChatService.instance.setProfilePhoto(File(path));
+      if (mounted) setState(() => _uploading = false);
     } catch (e) {
       if (!mounted) return;
+      setState(() => _uploading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not pick image: $e')),
+        SnackBar(content: Text('Could not update photo: $e')),
       );
     }
   }
@@ -149,6 +173,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  /// The profile picture: the freshly-picked local file if it still exists
+  /// (instant), otherwise the durable uploaded URL (survives iOS purging the
+  /// local file), otherwise an empty circle.
+  Widget _avatarImage() {
+    final f = _photo;
+    if (f != null && f.existsSync()) {
+      return Image.file(f,
+          width: 170,
+          height: 170,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stack) => _networkOrEmpty());
+    }
+    return _networkOrEmpty();
+  }
+
+  Widget _networkOrEmpty() {
+    final url = _store.photoUrl;
+    if (url != null && url.startsWith('http')) {
+      return Image.network(url,
+          width: 170,
+          height: 170,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stack) => const SizedBox.shrink());
+    }
+    return const SizedBox.shrink();
+  }
+
   @override
   Widget build(BuildContext context) {
     return GradientScaffold(
@@ -168,7 +219,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           // Avatar with camera badge
           Center(
             child: GestureDetector(
-              onTap: _pickPhoto,
+              onTap: _uploading ? null : _pickPhoto,
               child: SizedBox(
                 width: 190,
                 height: 190,
@@ -181,13 +232,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: Colors.transparent,
-                          border: Border.all(color: const Color(0xFF6B6880), width: 1.5),
-                          image: (_photo != null && _photo!.existsSync())
-                              ? DecorationImage(image: FileImage(_photo!), fit: BoxFit.cover)
-                              : null,
+                          border:
+                              Border.all(color: const Color(0xFF6B6880), width: 1.5),
                         ),
+                        child: ClipOval(child: _avatarImage()),
                       ),
                     ),
+                    // Upload spinner overlay.
+                    if (_uploading)
+                      Center(
+                        child: Container(
+                          width: 170,
+                          height: 170,
+                          decoration: const BoxDecoration(
+                              shape: BoxShape.circle, color: Colors.black54),
+                          child: const Center(
+                              child: CircularProgressIndicator(color: Colors.white)),
+                        ),
+                      ),
                     Positioned(
                       right: 18,
                       bottom: 28,

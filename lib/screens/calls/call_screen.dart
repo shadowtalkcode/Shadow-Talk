@@ -172,10 +172,9 @@ class _CallScreenState extends State<CallScreen> {
 
   Widget _photoOrGradient(ActiveCall call) {
     final p = call.peerPhoto;
-    if (p != null && p.isNotEmpty) {
-      final img = p.startsWith('http') ? NetworkImage(p) : AssetImage(p) as ImageProvider;
+    if (p != null && p.startsWith('http')) {
       return Image(
-        image: img,
+        image: NetworkImage(p),
         fit: BoxFit.cover,
         errorBuilder: (context, error, stack) =>
             Container(decoration: const BoxDecoration(gradient: AppColors.bgGradient)),
@@ -370,8 +369,8 @@ class _BigAvatar extends StatelessWidget {
     const size = 200.0;
     ImageProvider? img;
     final p = photo;
-    if (p != null && p.isNotEmpty) {
-      img = p.startsWith('http') ? NetworkImage(p) : AssetImage(p) as ImageProvider;
+    if (p != null && p.startsWith('http')) {
+      img = NetworkImage(p);
     }
     final bg = _palette[name.codeUnits.fold(0, (a, b) => a + b) % _palette.length];
     return Container(
