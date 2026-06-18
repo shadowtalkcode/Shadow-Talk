@@ -51,16 +51,52 @@ class BtcUi {
     if (context.mounted) _snack(context, '$label copied');
   }
 
+  /// One-tap paste: read the clipboard into [controller]. More reliable than
+  /// the long-press paste menu, which is finicky on real devices.
+  static Future<void> pasteInto(
+      BuildContext context, TextEditingController controller, String label) async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim() ?? '';
+    if (text.isEmpty) {
+      if (context.mounted) _snack(context, 'Clipboard is empty');
+      return;
+    }
+    controller.text = text;
+    controller.selection = TextSelection.collapsed(offset: text.length);
+    if (context.mounted) _snack(context, '$label pasted');
+  }
+
   static void snack(BuildContext context, String message) =>
       _snack(context, message);
 
   static void _snack(BuildContext context, String message) {
+    // High-contrast: a white card with dark bold text + an orange accent bar,
+    // so messages are clearly visible against the dark Bitcoin screen.
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.cardBg,
+        content: Row(
+          children: [
+            Container(width: 4, height: 22, color: orange),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Color(0xFF1C182A),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.white,
         behavior: SnackBarBehavior.floating,
+        elevation: 8,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        duration: const Duration(seconds: 3),
       ));
   }
 }
@@ -100,10 +136,11 @@ class BtcCopyField extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
+                // Selectable so users can also long-press to select/copy
+                // natively, in addition to the copy button.
+                child: SelectableText(
                   value.isEmpty ? 'N/A' : value,
                   maxLines: maxLines,
-                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: AppColors.white,
                     fontSize: 14,

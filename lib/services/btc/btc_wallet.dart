@@ -109,12 +109,19 @@ class BtcWallet {
     required int amountSats,
     required List<Utxo> utxos,
     int feeRate = 10,
+    bool allowUnconfirmed = false,
   }) {
-    // Only confirmed UTXOs are spendable (same rule as Android).
+    // Prefer confirmed UTXOs; when [allowUnconfirmed] is set, also spend pending
+    // (0-conf) funds — useful on testnet where waiting for confirmations is slow
+    // and the user wants to forward funds they just received.
     final confirmed = utxos.where((u) => u.confirmed).toList();
-    if (confirmed.isEmpty) {
+    final spendable = <Utxo>[
+      ...confirmed,
+      if (allowUnconfirmed) ...utxos.where((u) => !u.confirmed),
+    ];
+    if (spendable.isEmpty) {
       throw const BtcTransactionException(
-          'No confirmed UTXOs available. Please wait for confirmations.');
+          'No spendable funds yet. Connect to the internet and refresh.');
     }
 
     final BasedUtxoNetwork net = network;
@@ -132,7 +139,7 @@ class BtcWallet {
     final List<TxInput> inputs = [];
     final List<Utxo> used = [];
     int inputSum = 0;
-    for (final u in confirmed) {
+    for (final u in spendable) {
       inputs.add(TxInput(txId: u.txid, txIndex: u.vout));
       used.add(u);
       inputSum += u.value;
@@ -140,7 +147,8 @@ class BtcWallet {
     }
 
     if (inputSum < amountSats) {
-      throw const BtcTransactionException('Insufficient confirmed balance');
+      throw const BtcTransactionException(
+          'Insufficient balance for that amount plus the network fee');
     }
 
     // Outputs: recipient first, then (optionally) change.

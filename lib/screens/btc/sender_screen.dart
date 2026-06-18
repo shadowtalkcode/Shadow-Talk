@@ -64,12 +64,15 @@ class _SenderScreenState extends State<SenderScreen> {
           'Insufficient balance. Available: ${_balance.totalFormatted} BTC');
       return;
     }
-    final utxos = _balance.spendableUtxos;
+    // Use all known UTXOs (confirmed + pending). If nothing is cached at all,
+    // the wallet hasn't been refreshed online yet.
+    final utxos = _balance.utxos;
     if (utxos.isEmpty) {
       BtcUi.snack(context,
-          'No confirmed UTXOs cached. Connect to the internet and refresh.');
+          'No funds found yet. Connect to the internet and tap refresh.');
       return;
     }
+    final usingUnconfirmed = _balance.spendableUtxos.isEmpty;
 
     setState(() => _generating = true);
     try {
@@ -77,9 +80,16 @@ class _SenderScreenState extends State<SenderScreen> {
         recipientAddress: recipient,
         amountSats: amountSats,
         utxos: utxos,
+        allowUnconfirmed: true, // let pending testnet funds be forwarded
       );
       setState(() => _txHex = hex);
-      if (mounted) BtcUi.snack(context, 'Transaction generated');
+      if (mounted) {
+        BtcUi.snack(
+            context,
+            usingUnconfirmed
+                ? 'Transaction generated (spending unconfirmed funds — broadcast may need the incoming tx to confirm)'
+                : 'Transaction generated');
+      }
     } on BtcTransactionException catch (e) {
       if (mounted) BtcUi.snack(context, e.message);
     } catch (e) {
@@ -137,6 +147,7 @@ class _SenderScreenState extends State<SenderScreen> {
             controller: _recipientCtrl,
             label: 'Recipient Address',
             hint: 'tb1… or m/n…',
+            paste: true,
           ),
           const SizedBox(height: 16),
           _field(
@@ -254,6 +265,7 @@ class _SenderScreenState extends State<SenderScreen> {
     required String label,
     required String hint,
     TextInputType? keyboardType,
+    bool paste = false,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -270,6 +282,16 @@ class _SenderScreenState extends State<SenderScreen> {
             hintStyle: const TextStyle(color: AppColors.textMuted),
             filled: true,
             fillColor: BtcUi.cardBg,
+            // One-tap paste (e.g. paste a copied recipient address).
+            suffixIcon: paste
+                ? IconButton(
+                    icon: const Icon(Icons.content_paste,
+                        size: 20, color: BtcUi.orange),
+                    tooltip: 'Paste',
+                    onPressed: () =>
+                        BtcUi.pasteInto(context, controller, label),
+                  )
+                : null,
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: BtcUi.cardBorder),

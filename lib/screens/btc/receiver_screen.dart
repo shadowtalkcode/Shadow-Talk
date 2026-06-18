@@ -65,8 +65,20 @@ class _ReceiverScreenState extends State<ReceiverScreen> {
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
         children: [
           _meshInbox(),
-          const Text('Signed Transaction (hex)',
-              style: TextStyle(color: AppColors.textDesc, fontSize: 13)),
+          Row(
+            children: [
+              const Text('Signed Transaction (hex)',
+                  style: TextStyle(color: AppColors.textDesc, fontSize: 13)),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () =>
+                    BtcUi.pasteInto(context, _hexCtrl, 'Transaction hex'),
+                icon: const Icon(Icons.content_paste, size: 16, color: BtcUi.orange),
+                label: const Text('Paste',
+                    style: TextStyle(color: BtcUi.orange, fontSize: 13)),
+              ),
+            ],
+          ),
           const SizedBox(height: 6),
           TextField(
             controller: _hexCtrl,
