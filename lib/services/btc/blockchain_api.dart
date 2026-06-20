@@ -78,12 +78,19 @@ class BlockchainApi {
   /// POST a raw signed transaction hex to the network.
   /// Returns the txid on success (port of `BroadcastAPI.broadcastTransaction`).
   static Future<BroadcastResult> broadcast(String txHex) async {
+    // Signed hex pasted from chat / QR / the mesh inbox often carries stray
+    // whitespace or newlines; the node rejects those, so strip them first.
+    final cleanHex = txHex.replaceAll(RegExp(r'\s'), '');
+    if (cleanHex.isEmpty) {
+      return const BroadcastResult(
+          success: false, message: 'No transaction hex to broadcast');
+    }
     try {
       final res = await http
           .post(
             Uri.parse('$baseUrl/tx'),
             headers: {'Content-Type': 'text/plain'},
-            body: txHex,
+            body: cleanHex,
           )
           .timeout(_timeout);
 

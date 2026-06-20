@@ -48,6 +48,7 @@ class BtcUi {
       return;
     }
     await Clipboard.setData(ClipboardData(text: text));
+    await HapticFeedback.selectionClick();
     if (context.mounted) _snack(context, '$label copied');
   }
 
@@ -63,6 +64,7 @@ class BtcUi {
     }
     controller.text = text;
     controller.selection = TextSelection.collapsed(offset: text.length);
+    await HapticFeedback.selectionClick();
     if (context.mounted) _snack(context, '$label pasted');
   }
 

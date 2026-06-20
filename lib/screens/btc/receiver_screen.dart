@@ -44,15 +44,22 @@ class _ReceiverScreenState extends State<ReceiverScreen> {
     if (!mounted) return;
     setState(() {
       _broadcasting = false;
+      final msg = result.message ?? '';
       if (result.success) {
         _statusOk = true;
         _status = 'Transaction broadcast successfully!\n\nTX ID:\n${result.txId}';
         if (meshHex == null) _hexCtrl.clear();
         // Once broadcast, drop it from the mesh inbox.
         OfflineChatService.instance.clearIncomingBtcTransaction(hex);
+      } else if (msg.contains('already broadcast')) {
+        // Already on the network — the goal is met, so this isn't a failure.
+        _statusOk = true;
+        _status = 'Transaction is already on the network.';
+        if (meshHex == null) _hexCtrl.clear();
+        OfflineChatService.instance.clearIncomingBtcTransaction(hex);
       } else {
         _statusOk = false;
-        _status = 'Broadcast failed:\n${result.message}';
+        _status = 'Broadcast failed:\n$msg';
       }
     });
   }
